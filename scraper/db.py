@@ -19,6 +19,15 @@ load_dotenv()
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL", "")
 SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+# #region agent debug log
+import json as _json, time as _time
+_dbg = {"sessionId":"126406","location":"scraper/db.py:19","message":"env_vars_at_import","data":{"has_next_public_url":bool(os.getenv("NEXT_PUBLIC_SUPABASE_URL")),"has_supabase_url":bool(os.getenv("SUPABASE_URL")),"has_service_key":bool(SERVICE_KEY),"supabase_url_resolved":bool(SUPABASE_URL),"url_prefix":SUPABASE_URL[:15] if SUPABASE_URL else None},"timestamp":int(_time.time()*1000),"hypothesisId":"H-A,H-B,H-E"}
+print("[PASA_DBG]", _json.dumps(_dbg))
+try:
+    with open("debug-126406.log", "a") as _lf: _lf.write(_json.dumps(_dbg) + "\n")
+except Exception: pass
+# #endregion
+
 _client: Client | None = None
 _program_cache: dict[str, int] = {}
 _region_cache: dict[str, int] = {}
@@ -32,6 +41,13 @@ def now_iso() -> str:
 def client() -> Client:
     global _client
     if _client is None:
+        # #region agent debug log
+        _dbg2 = {"sessionId":"126406","location":"scraper/db.py:client","message":"client_called","data":{"supabase_url_empty":not SUPABASE_URL,"service_key_empty":not SERVICE_KEY},"timestamp":int(_time.time()*1000),"hypothesisId":"H-A,H-B,H-D"}
+        print("[PASA_DBG]", _json.dumps(_dbg2))
+        try:
+            with open("debug-126406.log", "a") as _lf: _lf.write(_json.dumps(_dbg2) + "\n")
+        except Exception: pass
+        # #endregion
         if not SUPABASE_URL or not SERVICE_KEY:
             raise RuntimeError(
                 "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. "

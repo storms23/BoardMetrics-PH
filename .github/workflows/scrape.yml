@@ -22,6 +22,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify secrets are present
+        env:
+          HAS_SUPABASE_URL: ${{ secrets.SUPABASE_URL != '' }}
+          HAS_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+          HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          echo "[DBG-H-A] SUPABASE_URL secret present: $HAS_SUPABASE_URL"
+          echo "[DBG-H-B] SUPABASE_SERVICE_ROLE_KEY secret present: $HAS_SERVICE_KEY"
+          echo "[DBG-H-A] ANTHROPIC_API_KEY secret present: $HAS_ANTHROPIC"
+
       - name: Install dependencies
         working-directory: scraper
         run: |
