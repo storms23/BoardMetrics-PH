@@ -92,6 +92,15 @@ def parse_html_table(html: str) -> list:
         rows = table.find_all("tr")
         if len(rows) < 3:
             continue
+        
+        # Check if this is a school performance table by looking at headers
+        header_row = rows[0]
+        header_text = " ".join([th.get_text(strip=True).lower() for th in header_row.find_all(["th", "td"])])
+        
+        # Must contain school-related keywords to be the right table
+        if not any(kw in header_text for kw in ["school", "institution", "university", "college"]):
+            continue
+        
         results = []
         for row in rows[1:]:
             cols = [td.get_text(strip=True) for td in row.find_all("td")]
@@ -103,6 +112,9 @@ def parse_html_table(html: str) -> list:
             except (ValueError, IndexError):
                 pr = None
             name = cols[0]
+            # Skip rows where name looks like a date
+            if re.match(r"^(January|February|March|April|May|June|July|August|September|October|November|December)", name, re.IGNORECASE):
+                continue
             results.append({
                 "school": name,
                 "takers": cols[1],
