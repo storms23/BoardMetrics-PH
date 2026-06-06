@@ -87,63 +87,90 @@ def get_date(title: str, text: str = "") -> dict:
 
 # ── EXTRACT: school table (HTML, with OCR fallback) ───────────────────────────
 def parse_html_table(html: str) -> list:
+    """
+    Handles two table formats found in PRC results pages:
+
+    Format A (4-col simplified, used by boardexams.ph):
+      School Name | No. of Examinees | No. of Passers | % Passed
+
+    Format B (14-col PRC standard, with breakdown):
+      Seq | School | FT_Pass | FT_Fail | FT_Total | FT_% |
+          | Rep_Pass | Rep_Fail | Rep_Total | Rep_% |
+          | Overall_Pass | Overall_Fail | Overall_Total | Overall_%
+    """
     soup = BeautifulSoup(html, "html.parser")
     best_results = []
 
     for table in soup.find_all("table"):
         rows = table.find_all("tr")
+        # Need header row + at least 2 data rows
         if len(rows) < 3:
             continue
 
-        # Check header row for school-related OR numeric-column keywords
-        header_row = rows[0]
-        header_cells = [c.get_text(strip=True).lower() for c in header_row.find_all(["th", "td"])]
-        header_text = " ".join(header_cells)
-
-        # Must look like a performance table: has school/name keyword OR has
-        # numeric keywords (examinees/passers/passed/percent) in the header
-        performance_keywords = ["school", "institution", "university", "college", "name"]
-        numeric_keywords = ["examinee", "passer", "passed", "percent", "%", "taker", "taken"]
-        has_name_col = any(kw in header_text for kw in performance_keywords)
-        has_numeric_col = any(kw in header_text for kw in numeric_keywords)
-
-        if not (has_name_col or has_numeric_col):
+        # Sample the first few data rows to decide column layout
+        sample_rows = []
+        for row in rows[1:6]:
+            cols = [td.get_text(strip=True) for td in row.find_all("td")]
+            if cols:
+                sample_rows.append(cols)
+        if not sample_rows:
             continue
+
+        # Detect column layout by checking if col[0] is a sequential number
+        # (Format B) or a school name (Format A)
+        first_vals = [r[0] for r in sample_rows if r]
+        col0_is_seqno = sum(1 for v in first_vals if re.match(r"^\d+$", v.strip())) >= len(first_vals) // 2
 
         results = []
         for row in rows[1:]:
             cols = [td.get_text(strip=True) for td in row.find_all("td")]
-            if len(cols) < 3:
-                continue
 
-            name = cols[0].strip()
+            if col0_is_seqno:
+                # Format B: col[0]=seq_no, col[1]=school, last cols are Overall
+                if len(cols) < 5:
+                    continue
+                name = cols[1].strip() if len(cols) > 1 else ""
+                # Overall performance is in the last 4 columns
+                try:
+                    takers  = int(str(cols[-2]).replace(",", "").strip())
+                    passers = int(str(cols[-4]).replace(",", "").strip())
+                    pr_raw  = cols[-1].replace("%", "").replace(",", "").strip()
+                    pr      = float(pr_raw)
+                except (ValueError, IndexError):
+                    takers, passers, pr = None, None, None
+            else:
+                # Format A: col[0]=school, col[1]=takers, col[2]=passers, col[3]=pass_rate
+                if len(cols) < 3:
+                    continue
+                name = cols[0].strip()
+                try:
+                    takers  = int(str(cols[1]).replace(",", "").strip())
+                    passers = int(str(cols[2]).replace(",", "").strip())
+                    pr_raw  = (cols[3] if len(cols) > 3 else cols[-1]).replace("%", "").replace(",", "").strip()
+                    pr      = float(pr_raw)
+                except (ValueError, IndexError):
+                    takers, passers, pr = None, None, None
+
             if not name:
                 continue
 
-            # Skip rows where name looks like a date (e.g. "May 2016")
+            # Skip rows where name is a date ("May 2016", "Sept-Oct 2023", etc.)
             if re.match(
                 r"^(January|February|March|April|May|June|July|August|"
-                r"September|October|November|December)\b",
+                r"September|October|November|December|Jan|Feb|Mar|Apr|"
+                r"Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b",
                 name, re.IGNORECASE,
             ):
                 continue
 
-            # Skip rows where name is purely numeric
+            # Skip rows where name is purely numeric (stray seq-no rows)
             if re.match(r"^\d+$", name):
                 continue
 
-            try:
-                pr_str = cols[3] if len(cols) > 3 else cols[-1]
-                pr = float(pr_str.replace("%", "").replace(",", "").strip())
-            except (ValueError, IndexError):
-                pr = None
-
-            try:
-                takers = int(str(cols[1]).replace(",", "").strip())
-                passers = int(str(cols[2]).replace(",", "").strip())
-            except (ValueError, IndexError):
-                takers = cols[1]
-                passers = cols[2]
+            # Skip header-like rows (contain keywords like "School", "Examinee")
+            if re.match(r"^(School|Institution|Name|Examinee|Passer|Passed|Total|Seq|No\.?)\b",
+                        name, re.IGNORECASE):
+                continue
 
             results.append({
                 "school": name,
@@ -154,7 +181,7 @@ def parse_html_table(html: str) -> list:
                 "region": infer_region(name),
             })
 
-        # Prefer the table with the most valid school rows
+        # Keep the table with the most valid school rows
         if len(results) > len(best_results):
             best_results = results
 
@@ -269,6 +296,12 @@ def scrape(exam_code: str, year: int) -> None:
             stats = get_summary(text)
             date = get_date(title, text)
             if not stats:
+                continue
+
+            # Skip posts whose extracted year doesn't match the target year
+            # (WordPress search can return posts from other years)
+            if date["year"] and abs(date["year"] - year) > 1:
+                print(f"  Skipping post year={date['year']} (target={year}): {title[:60]}")
                 continue
 
             print(f"  {stats['total_passers']:,}/{stats['total_takers']:,} "
