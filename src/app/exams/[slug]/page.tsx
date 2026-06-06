@@ -67,9 +67,10 @@ export default async function ExamPage({
 
   const latest = history[0];
   const trendData = (difficulty?.data ?? []).map((d: any) => ({
-    label: `${d.month ?? ""} ${d.year}`.trim(),
+    label: String(d.year),
     national: d.national_pass_rate,
   }));
+  const topSchoolYear = topSchools[0]?.year;
 
   return (
     <div className="space-y-8">
@@ -93,9 +94,11 @@ export default async function ExamPage({
         />
       </div>
 
-      {trendData.length > 0 && (
+      {trendData.length > 1 && (
         <section>
-          <SectionTitle>National passing rate over time (difficulty trend)</SectionTitle>
+          <SectionTitle>
+            National passing rate trend ({trendData[0]?.label}–{trendData[trendData.length - 1]?.label})
+          </SectionTitle>
           <Card>
             <LineTrend data={trendData} showNational={false} />
           </Card>
@@ -103,7 +106,9 @@ export default async function ExamPage({
       )}
 
       <section>
-        <SectionTitle>Top performing schools</SectionTitle>
+        <SectionTitle>
+          Top performing schools{topSchoolYear ? ` — ${topSchoolYear}` : ""}
+        </SectionTitle>
         {topSchools.length === 0 ? (
           <Card>No school-level data yet for this exam.</Card>
         ) : (

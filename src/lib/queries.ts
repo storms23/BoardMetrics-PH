@@ -3,10 +3,41 @@ import { computeConsistency, classifyTrend } from "./consistency";
 
 /**
  * Shared data-access functions used by both /api/v1 route handlers and server
- * components. Ports the logic from the reference FastAPI api.py to typed
- * Supabase queries. Heavy aggregations are done in JS for the MVP; hot paths
- * can later be moved to Postgres views/RPC without changing call sites.
+ * components.
+ *
+ * FIX: All queries that previously used nested ilike filters on joined tables
+ * (e.g. .ilike("exam_results.programs.exam_code", code)) have been rewritten
+ * using a two-step approach: first resolve the program_id / exam_result_ids,
+ * then use .in() on the direct FK column. This avoids a PostgREST limitation
+ * where nested relationship filters return null rows instead of excluding them.
  */
+
+// ─── Shared helper: resolve program id + exam_result ids ───────────────────
+async function resolveExamResultIds(
+  examCode: string,
+  year?: number,
+  month?: string,
+): Promise<{ programId: number; erIds: number[]; erMap: Map<number, any> } | null> {
+  const sb = getServerClient();
+  const { data: prog } = await sb
+    .from("programs")
+    .select("id")
+    .ilike("exam_code", examCode)
+    .maybeSingle();
+  if (!prog) return null;
+
+  let q = sb
+    .from("exam_results")
+    .select("id, year, month, pass_rate")
+    .eq("program_id", (prog as any).id);
+  if (year) q = q.eq("year", year);
+  if (month) q = q.ilike("month", `%${month}%`);
+  const { data: erRows } = await q.order("year", { ascending: false });
+
+  const erIds = (erRows ?? []).map((r: any) => r.id);
+  const erMap = new Map((erRows ?? []).map((r: any) => [r.id, r]));
+  return { programId: (prog as any).id, erIds, erMap };
+}
 
 export interface RankingFilters {
   examCode: string;
@@ -14,6 +45,14 @@ export interface RankingFilters {
   month?: string;
   region?: string;
   minTakers?: number;
+  limit?: number;
+}
+
+export interface AggregateRankingFilters {
+  examCode: string;
+  region?: string;
+  minTakers?: number;
+  minYears?: number;
   limit?: number;
 }
 
@@ -61,17 +100,19 @@ export async function listExams() {
 
 export async function getExamHistory(examCode: string, year?: number, month?: string) {
   const sb = getServerClient();
-  let q = sb
+  const resolved = await resolveExamResultIds(examCode, year, month);
+  if (!resolved || !resolved.erIds.length) return [];
+
+  const { data, error } = await sb
     .from("exam_results")
     .select("*, programs!inner(exam_code, name, slug)")
-    .ilike("programs.exam_code", examCode);
-  if (year) q = q.eq("year", year);
-  if (month) q = q.ilike("month", `%${month}%`);
-  const { data, error } = await q.order("year", { ascending: false });
+    .in("id", resolved.erIds)
+    .order("year", { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
 
+// ─── Top schools for a given exam cycle (most recent year by default) ───────
 export async function examTopSchools(
   examCode: string,
   year?: number,
@@ -79,33 +120,51 @@ export async function examTopSchools(
   limit = 20,
 ) {
   const sb = getServerClient();
-  let q = sb
+
+  // If no year specified, use the most recent year available
+  let targetYear = year;
+  if (!targetYear) {
+    const { data: latestRow } = await sb
+      .from("exam_results")
+      .select("year, programs!inner(exam_code)")
+      .ilike("programs.exam_code", examCode)
+      .order("year", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    targetYear = (latestRow as any)?.year ?? undefined;
+  }
+
+  const resolved = await resolveExamResultIds(examCode, targetYear, month);
+  if (!resolved || !resolved.erIds.length) return [];
+
+  const { data, error } = await sb
     .from("school_performance")
-    .select(
-      "rank, takers, passers, pass_rate, schools!inner(id, name, slug, regions(name, code)), exam_results!inner(year, month, pass_rate, programs!inner(exam_code))",
-    )
-    .ilike("exam_results.programs.exam_code", examCode);
-  if (year) q = q.eq("exam_results.year", year);
-  if (month) q = q.ilike("exam_results.month", `%${month}%`);
-  const { data, error } = await q.order("rank", { ascending: true }).limit(limit);
+    .select("rank, takers, passers, pass_rate, exam_result_id, schools!inner(id, name, slug, regions(name, code))")
+    .in("exam_result_id", resolved.erIds)
+    .order("rank", { ascending: true })
+    .limit(limit);
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
-    rank: r.rank,
-    school: r.schools.name,
-    school_id: r.schools.id,
-    slug: r.schools.slug,
-    region: r.schools.regions?.name ?? null,
-    takers: r.takers,
-    passers: r.passers,
-    pass_rate: r.pass_rate,
-    year: r.exam_results.year,
-    month: r.exam_results.month,
-    national_rate: r.exam_results.pass_rate,
-    gap:
-      r.pass_rate != null && r.exam_results.pass_rate != null
-        ? Math.round((r.pass_rate - r.exam_results.pass_rate) * 100) / 100
-        : null,
-  }));
+
+  return (data ?? []).map((r: any) => {
+    const er = resolved.erMap.get(r.exam_result_id) as any;
+    return {
+      rank: r.rank,
+      school: r.schools.name,
+      school_id: r.schools.id,
+      slug: r.schools.slug,
+      region: r.schools.regions?.name ?? null,
+      takers: r.takers,
+      passers: r.passers,
+      pass_rate: r.pass_rate,
+      year: er?.year ?? targetYear,
+      month: er?.month ?? null,
+      national_rate: er?.pass_rate ?? null,
+      gap:
+        r.pass_rate != null && er?.pass_rate != null
+          ? Math.round((r.pass_rate - er.pass_rate) * 100) / 100
+          : null,
+    };
+  });
 }
 
 // ─── SCHOOLS ───────────────────────────────────────────────────────────────
@@ -152,7 +211,7 @@ export async function getSchoolProfile(schoolId: number) {
   const { data: history, error: he } = await sb
     .from("school_performance")
     .select(
-      "takers, passers, pass_rate, rank, exam_results!inner(year, month, pass_rate, programs!inner(exam_code, name, slug))",
+      "takers, passers, pass_rate, rank, exam_result_id, exam_results!inner(year, month, pass_rate, programs!inner(exam_code, name, slug))",
     )
     .eq("school_id", schoolId)
     .order("exam_results(year)", { ascending: false });
@@ -209,43 +268,116 @@ export async function schoolTopnotchers(schoolId: number) {
   const { data, error } = await sb
     .from("topnotchers")
     .select("rank, name, rating, exam_results!inner(year, month, programs!inner(exam_code, name))")
-    .ilike("school", `%${school.name}%`)
+    .ilike("school", `%${(school as any).name}%`)
     .order("exam_results(year)", { ascending: false });
   if (error) throw error;
-  return { school: school.name, topnotchers: data ?? [] };
+  return { school: (school as any).name, topnotchers: data ?? [] };
 }
 
-// ─── RANKINGS ──────────────────────────────────────────────────────────────
+// ─── SINGLE-YEAR RANKINGS (per exam cycle) ─────────────────────────────────
 export async function getRankings(f: RankingFilters) {
   const sb = getServerClient();
+  const resolved = await resolveExamResultIds(f.examCode, f.year, f.month);
+  if (!resolved || !resolved.erIds.length) return [];
+
   let q = sb
     .from("school_performance")
     .select(
-      "rank, takers, passers, pass_rate, schools!inner(id, name, slug, regions(name, code), provinces(name)), exam_results!inner(year, month, pass_rate, programs!inner(exam_code))",
+      "rank, takers, passers, pass_rate, exam_result_id, schools!inner(id, name, slug, regions(name, code))",
     )
-    .ilike("exam_results.programs.exam_code", f.examCode);
-  if (f.year) q = q.eq("exam_results.year", f.year);
-  if (f.month) q = q.ilike("exam_results.month", `%${f.month}%`);
-  if (f.region) q = q.ilike("schools.regions.name", `%${f.region}%`);
+    .in("exam_result_id", resolved.erIds);
   if (f.minTakers) q = q.gte("takers", f.minTakers);
 
-  const { data, error } = await q.order("rank", { ascending: true }).limit(f.limit ?? 50);
+  const { data, error } = await q.order("rank", { ascending: true }).limit(f.limit ?? 100);
   if (error) throw error;
 
-  return (data ?? []).map((r: any) => ({
-    rank: r.rank,
-    school: r.schools.name,
-    school_id: r.schools.id,
-    slug: r.schools.slug,
-    region: r.schools.regions?.name ?? null,
-    province: r.schools.provinces?.name ?? null,
-    takers: r.takers,
-    passers: r.passers,
-    pass_rate: r.pass_rate,
-    year: r.exam_results.year,
-    month: r.exam_results.month,
-    national_rate: r.exam_results.pass_rate,
-  }));
+  let rows = (data ?? []).map((r: any) => {
+    const er = resolved.erMap.get(r.exam_result_id) as any;
+    return {
+      rank: r.rank,
+      school: r.schools.name,
+      school_id: r.schools.id,
+      region: r.schools.regions?.name ?? null,
+      takers: r.takers,
+      passers: r.passers,
+      pass_rate: r.pass_rate,
+      year: er?.year,
+      month: er?.month,
+      national_rate: er?.pass_rate ?? null,
+    };
+  });
+
+  if (f.region) {
+    const reg = f.region.toLowerCase();
+    rows = rows.filter((r) => r.region?.toLowerCase().includes(reg));
+  }
+
+  return rows;
+}
+
+// ─── MULTI-YEAR AGGREGATE RANKINGS ─────────────────────────────────────────
+// Ranks schools by their average pass rate across ALL available years for a
+// given board exam. This is the "10-year performance" ranking the user wants.
+export async function getAggregateRankings(f: AggregateRankingFilters) {
+  const sb = getServerClient();
+  const resolved = await resolveExamResultIds(f.examCode);
+  if (!resolved || !resolved.erIds.length) return [];
+
+  const { data, error } = await sb
+    .from("school_performance")
+    .select(
+      "takers, passers, pass_rate, exam_result_id, schools!inner(id, name, slug, regions(name, code))",
+    )
+    .in("exam_result_id", resolved.erIds);
+  if (error) throw error;
+
+  const schoolMap = new Map<number, any>();
+  for (const r of data ?? []) {
+    const school = (r as any).schools;
+    const sid = school.id;
+    const year = resolved.erMap.get(r.exam_result_id)?.year;
+
+    if (f.region && !school.regions?.name?.toLowerCase().includes(f.region.toLowerCase())) continue;
+
+    const g = schoolMap.get(sid) ?? {
+      school_id: sid,
+      school: school.name,
+      slug: school.slug,
+      region: school.regions?.name ?? null,
+      rates: [] as number[],
+      total_takers: 0,
+      total_passers: 0,
+      years: new Set<number>(),
+    };
+    if (r.pass_rate != null) g.rates.push(r.pass_rate);
+    g.total_takers += r.takers ?? 0;
+    g.total_passers += r.passers ?? 0;
+    if (year) g.years.add(year);
+    schoolMap.set(sid, g);
+  }
+
+  const minYears = f.minYears ?? 1;
+  return [...schoolMap.values()]
+    .filter((g) => g.rates.length > 0 && g.years.size >= minYears)
+    .filter((g) => !f.minTakers || g.total_takers >= f.minTakers)
+    .map((g) => ({
+      school_id: g.school_id,
+      school: g.school,
+      slug: g.slug,
+      region: g.region,
+      avg_pass_rate:
+        Math.round(
+          (g.rates.reduce((a: number, b: number) => a + b, 0) / g.rates.length) * 100,
+        ) / 100,
+      best_pass_rate: Math.round(Math.max(...g.rates) * 100) / 100,
+      worst_pass_rate: Math.round(Math.min(...g.rates) * 100) / 100,
+      total_takers: g.total_takers,
+      total_passers: g.total_passers,
+      years_participated: g.years.size,
+    }))
+    .sort((a, b) => b.avg_pass_rate - a.avg_pass_rate)
+    .slice(0, f.limit ?? 100)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 // ─── TOPNOTCHERS ───────────────────────────────────────────────────────────
@@ -309,13 +441,18 @@ export async function compareSchools(ids: number[], examCode?: string) {
 // ─── REGIONS ───────────────────────────────────────────────────────────────
 export async function regionalAnalytics(examCode?: string, year?: number) {
   const sb = getServerClient();
+
+  let erIds: number[] | undefined;
+  if (examCode) {
+    const resolved = await resolveExamResultIds(examCode, year);
+    if (!resolved) return [];
+    erIds = resolved.erIds;
+  }
+
   let q = sb
     .from("school_performance")
-    .select(
-      "passers, takers, pass_rate, schools!inner(id, regions!inner(name)), exam_results!inner(year, programs!inner(exam_code))",
-    );
-  if (examCode) q = q.ilike("exam_results.programs.exam_code", examCode);
-  if (year) q = q.eq("exam_results.year", year);
+    .select("passers, takers, pass_rate, exam_result_id, schools!inner(id, regions!inner(name))");
+  if (erIds) q = q.in("exam_result_id", erIds);
   const { data, error } = await q;
   if (error) throw error;
 
@@ -373,12 +510,16 @@ export async function schoolTrend(schoolId: number, examCode?: string) {
 
 export async function examDifficulty(examCode: string) {
   const sb = getServerClient();
+  const resolved = await resolveExamResultIds(examCode);
+  if (!resolved || !resolved.erIds.length) return { exam_code: examCode, data: [], avg_rate: null, highest_rate: null, lowest_rate: null };
+
   const { data, error } = await sb
     .from("exam_results")
-    .select("year, month, pass_rate, total_takers, programs!inner(exam_code)")
-    .ilike("programs.exam_code", examCode)
+    .select("id, year, month, pass_rate, total_takers")
+    .in("id", resolved.erIds)
     .order("year", { ascending: true });
   if (error) throw error;
+
   const flat = (data ?? []).map((r: any) => ({
     year: r.year,
     month: r.month,
@@ -397,16 +538,19 @@ export async function examDifficulty(examCode: string) {
   };
 }
 
-// ─── LEADERBOARD (analytics #9) ──────────────────────────────────────────────
+// ─── LEADERBOARD: top by consistency score ────────────────────────────────
 export async function topByConsistency(limit = 25) {
   const sb = getServerClient();
   const { data, error } = await sb
     .from("consistency_scores")
-    .select("score, label, avg_rate, years, schools!inner(id, name, slug, regions(name)), programs!inner(exam_code, name)")
+    .select(
+      "score, label, avg_rate, years, schools!inner(id, name, slug, regions(name)), programs!inner(exam_code, name)",
+    )
     .order("score", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+
+  const rows = (data ?? []).map((r: any) => ({
     school: r.schools.name,
     school_id: r.schools.id,
     region: r.schools.regions?.name ?? null,
@@ -416,6 +560,56 @@ export async function topByConsistency(limit = 25) {
     avg_rate: r.avg_rate,
     years: r.years,
   }));
+
+  // If consistency_scores is empty, fall back to an aggregate calculation
+  // directly from school_performance (needs ≥2 years to be meaningful)
+  if (rows.length === 0) {
+    return topByAggregateRate(limit);
+  }
+  return rows;
+}
+
+// Fallback leaderboard: aggregate pass rate across all programs/years
+async function topByAggregateRate(limit: number) {
+  const sb = getServerClient();
+  const { data, error } = await sb
+    .from("school_performance")
+    .select(
+      "pass_rate, exam_result_id, schools!inner(id, name, slug, regions(name)), exam_results!inner(year, programs!inner(exam_code))",
+    );
+  if (error || !data?.length) return [];
+
+  const key = (r: any) => `${r.schools.id}__${r.exam_results.programs.exam_code}`;
+  const grouped = new Map<string, any>();
+  for (const r of data) {
+    const k = key(r);
+    const g = grouped.get(k) ?? {
+      school: (r as any).schools.name,
+      school_id: (r as any).schools.id,
+      region: (r as any).schools.regions?.name ?? null,
+      exam_code: (r as any).exam_results.programs.exam_code,
+      rates: [] as number[],
+      years: new Set<number>(),
+    };
+    if (r.pass_rate != null) g.rates.push(r.pass_rate);
+    g.years.add((r as any).exam_results.year);
+    grouped.set(k, g);
+  }
+
+  return [...grouped.values()]
+    .filter((g) => g.rates.length >= 2)
+    .map((g) => ({
+      school: g.school,
+      school_id: g.school_id,
+      region: g.region,
+      exam_code: g.exam_code,
+      avg_rate: Math.round((g.rates.reduce((a: number, b: number) => a + b, 0) / g.rates.length) * 100) / 100,
+      years: g.years.size,
+      score: null as number | null,
+      label: "Provisional" as string,
+    }))
+    .sort((a, b) => b.avg_rate - a.avg_rate)
+    .slice(0, limit);
 }
 
 // ─── EXAM POPULARITY (analytics #6) ──────────────────────────────────────────
