@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/* Tailwind v4 theme — defines the brand/ink color utilities (bg-ink, text-brand-light, etc.). */
+@theme {
+  --color-brand: #7c3aed;
+  --color-brand-dark: #5b21b6;
+  --color-brand-light: #a78bfa;
+  --color-ink: #0a0a14;
+  --color-ink-soft: #0d0d1e;
+  --color-ink-line: #1a1a2e;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-brand-light);
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: #ffffff;
+}

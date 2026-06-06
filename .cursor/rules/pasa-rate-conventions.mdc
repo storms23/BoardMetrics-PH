@@ -1,0 +1,29 @@
+---
+description: Core conventions for the Pasa Rate PH codebase (programs registry, Supabase access, idempotency).
+alwaysApply: true
+---
+
+# Pasa Rate PH — Core Conventions
+
+## Program registry is the single source of truth
+- Supported board exams live ONLY in `src/lib/programs.ts` (and its Python mirror
+  `scraper/programs.py` + `supabase/seed/seed.sql`).
+- NEVER hardcode exam-code lists elsewhere. Import from the registry.
+- To add a program: add a registry entry in all three places, run the seed, scrape.
+
+## Supabase access
+- Public reads: `getServerClient()` / `getBrowserClient()` (anon key, RLS-limited).
+- Trusted writes (ETL/admin only): `getServiceClient()` (service role, server-only).
+- Never import `getServiceClient` or `src/lib/admin.ts` into client components.
+- Always guard pages with `isSupabaseConfigured()` so the app degrades gracefully
+  before keys are set.
+
+## Data integrity
+- All ETL writes are idempotent upserts on the UNIQUE keys in
+  `supabase/migrations/0001_init.sql`. Keep them that way.
+- Validate and parse all API query params; respond with `apiError(...)` from
+  `src/lib/http.ts`. Wrap public handlers in `withRateLimit(...)`.
+
+## Secrets
+- Keys come from env only (`.env.local` / Vercel). Never commit `.env`.
+- `.env.example` documents every required variable.

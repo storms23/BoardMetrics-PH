@@ -1,0 +1,19 @@
+---
+description: Conventions for the Python ETL/scraper that ingests PRC results into Supabase.
+globs: scraper/**/*.py
+alwaysApply: false
+---
+
+# Scraper / ETL Conventions
+
+- Discovery via the boardexams.ph WordPress REST API; national stats via regex;
+  school tables via HTML first, then Playwright + Claude OCR fallback.
+- Write through `db.py` only. Every write is an idempotent upsert with an
+  `on_conflict` matching the table's UNIQUE key. No raw duplicate inserts.
+- Normalize school names with `normalize.py` before insert to keep `schools`
+  deduplicated.
+- Wrap each program/year run in an import job (`db.start_import_job` /
+  `db.finish_import_job`) and write an `audit` entry for significant changes.
+- Do NOT scrape or store the full passer roll — only national stats, per-school
+  performance, and Top 10 topnotchers.
+- After scraping, run `consistency.py` to recompute Consistency Scores.

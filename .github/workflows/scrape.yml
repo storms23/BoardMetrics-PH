@@ -1,0 +1,39 @@
+name: Scheduled Scrape
+
+# Runs the ETL pipeline to ingest new PRC results into Supabase, then
+# recomputes Consistency Scores. Adjust the cron as cadence requires.
+on:
+  schedule:
+    - cron: "0 18 * * 0" # Sundays 18:00 UTC (02:00 Mon PHT)
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Year to scrape (all 16 programs)"
+        required: true
+        default: "2025"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run scraper
+        working-directory: scraper
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scraper.py --all ${{ github.event.inputs.year || '2025' }}
+          python consistency.py
