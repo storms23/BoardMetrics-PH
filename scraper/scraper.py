@@ -88,44 +88,77 @@ def get_date(title: str, text: str = "") -> dict:
 # ── EXTRACT: school table (HTML, with OCR fallback) ───────────────────────────
 def parse_html_table(html: str) -> list:
     soup = BeautifulSoup(html, "html.parser")
+    best_results = []
+
     for table in soup.find_all("table"):
         rows = table.find_all("tr")
         if len(rows) < 3:
             continue
-        
-        # Check if this is a school performance table by looking at headers
+
+        # Check header row for school-related OR numeric-column keywords
         header_row = rows[0]
-        header_text = " ".join([th.get_text(strip=True).lower() for th in header_row.find_all(["th", "td"])])
-        
-        # Must contain school-related keywords to be the right table
-        if not any(kw in header_text for kw in ["school", "institution", "university", "college"]):
+        header_cells = [c.get_text(strip=True).lower() for c in header_row.find_all(["th", "td"])]
+        header_text = " ".join(header_cells)
+
+        # Must look like a performance table: has school/name keyword OR has
+        # numeric keywords (examinees/passers/passed/percent) in the header
+        performance_keywords = ["school", "institution", "university", "college", "name"]
+        numeric_keywords = ["examinee", "passer", "passed", "percent", "%", "taker", "taken"]
+        has_name_col = any(kw in header_text for kw in performance_keywords)
+        has_numeric_col = any(kw in header_text for kw in numeric_keywords)
+
+        if not (has_name_col or has_numeric_col):
             continue
-        
+
         results = []
         for row in rows[1:]:
             cols = [td.get_text(strip=True) for td in row.find_all("td")]
             if len(cols) < 3:
                 continue
+
+            name = cols[0].strip()
+            if not name:
+                continue
+
+            # Skip rows where name looks like a date (e.g. "May 2016")
+            if re.match(
+                r"^(January|February|March|April|May|June|July|August|"
+                r"September|October|November|December)\b",
+                name, re.IGNORECASE,
+            ):
+                continue
+
+            # Skip rows where name is purely numeric
+            if re.match(r"^\d+$", name):
+                continue
+
             try:
                 pr_str = cols[3] if len(cols) > 3 else cols[-1]
                 pr = float(pr_str.replace("%", "").replace(",", "").strip())
             except (ValueError, IndexError):
                 pr = None
-            name = cols[0]
-            # Skip rows where name looks like a date
-            if re.match(r"^(January|February|March|April|May|June|July|August|September|October|November|December)", name, re.IGNORECASE):
-                continue
+
+            try:
+                takers = int(str(cols[1]).replace(",", "").strip())
+                passers = int(str(cols[2]).replace(",", "").strip())
+            except (ValueError, IndexError):
+                takers = cols[1]
+                passers = cols[2]
+
             results.append({
                 "school": name,
-                "takers": cols[1],
-                "passers": cols[2],
+                "takers": takers,
+                "passers": passers,
                 "pass_rate": pr,
                 "rank": len(results) + 1,
                 "region": infer_region(name),
             })
-        if results:
-            return results
-    return []
+
+        # Prefer the table with the most valid school rows
+        if len(results) > len(best_results):
+            best_results = results
+
+    return best_results
 
 
 def get_images_via_playwright(url: str) -> list:
