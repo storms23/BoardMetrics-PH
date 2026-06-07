@@ -32,7 +32,35 @@ def parse_school_table_from_text(text: str) -> list:
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     
     for line in lines:
-        # Match: "1 MAPUA UNIVERSITY 441 411 93.20"
+        # Try pipe-delimited format first (OCR.space markdown tables)
+        # Format: | 1 | UNIVERSITY NAME | 139 | 113 | 81.29% |
+        if "|" in line:
+            parts = [p.strip() for p in line.split("|") if p.strip()]
+            if len(parts) >= 5:
+                try:
+                    # Skip header and separator rows
+                    if parts[0].upper() in ("RANK", "---", "---|"):
+                        continue
+                    
+                    rank = int(parts[0])
+                    school = parts[1].strip()
+                    takers = int(parts[2].replace(",", ""))
+                    passers = int(parts[3].replace(",", ""))
+                    rate = float(parts[4].replace("%", "").strip())
+                    
+                    schools.append({
+                        "rank": rank,
+                        "school": school,
+                        "takers": takers,
+                        "passers": passers,
+                        "pass_rate": rate,
+                    })
+                    continue
+                except (ValueError, IndexError):
+                    pass
+        
+        # Fallback: space-delimited format
+        # Format: "1 MAPUA UNIVERSITY 441 411 93.20"
         m = re.match(r"^(\d+)\s+(.+?)\s+(\d+)\s+(\d+)\s+([\d.]+)\s*%?\s*$", line, re.I)
         if m:
             rank, school, takers, passers, rate = m.groups()
@@ -43,6 +71,7 @@ def parse_school_table_from_text(text: str) -> list:
                 "passers": int(passers),
                 "pass_rate": float(rate),
             })
+    
     return schools
 
 

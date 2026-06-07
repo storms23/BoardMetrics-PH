@@ -489,54 +489,52 @@ def ocr_image_ocrspace(image_url: str, mode: str = "school") -> list:
 
 
 def parse_school_table_from_text(text: str) -> list:
-    """Parse school performance table from OCR text."""
+    """Parse school performance table from OCR text (handles both pipe-delimited and space-delimited)."""
     schools = []
-    lines = text.strip().split("\n")
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     
     for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+        # Try pipe-delimited format first (OCR.space markdown tables)
+        # Format: | 1 | UNIVERSITY NAME | 139 | 113 | 81.29% |
+        if "|" in line and line.count("|") >= 5:
+            parts = [p.strip() for p in line.split("|") if p.strip()]
+            if len(parts) >= 5:
+                try:
+                    # Skip header and separator rows
+                    if parts[0].upper() in ("RANK", "---", "---|") or "SCHOOL" in parts[1].upper():
+                        continue
+                    
+                    rank = int(parts[0].replace(",", ""))
+                    school = parts[1].strip()
+                    takers = int(parts[2].replace(",", ""))
+                    passers = int(parts[3].replace(",", ""))
+                    rate = float(parts[4].replace("%", "").replace(",", "").strip())
+                    
+                    schools.append({
+                        "rank": rank,
+                        "school": school,
+                        "takers": takers,
+                        "passers": passers,
+                        "pass_rate": rate,
+                        "region": infer_region(school),
+                    })
+                    continue
+                except (ValueError, IndexError):
+                    pass
         
-        # Try to extract: rank, school name, takers, passers, pass_rate
-        # Common patterns:
-        # "1 UNIVERSITY OF SANTO TOMAS 100 95 95.00%"
-        # "1 | UNIVERSITY OF SANTO TOMAS | 100 | 95 | 95.00%"
-        
-        # Remove common table separators
-        line = line.replace("|", " ").replace("\t", " ")
-        
-        # Extract numbers (rank, takers, passers, percentage)
-        import re
-        numbers = re.findall(r"[\d,]+\.?\d*", line)
-        if len(numbers) < 3:  # Need at least rank, takers, passers
-            continue
-        
-        # Try to extract school name (text between first number and subsequent numbers)
-        match = re.match(r"^\s*(\d+)\s+(.+?)\s+([\d,]+)\s+([\d,]+)\s+([\d.]+)", line)
-        if not match:
-            continue
-        
-        rank, school, takers, passers, pass_rate = match.groups()
-        
-        # Clean up
-        school = school.strip()
-        takers = int(takers.replace(",", ""))
-        passers = int(passers.replace(",", ""))
-        pass_rate = float(pass_rate)
-        
-        # Skip header rows
-        if "school" in school.lower() or "institution" in school.lower():
-            continue
-        
-        schools.append({
-            "rank": int(rank),
-            "school": school,
-            "takers": takers,
-            "passers": passers,
-            "pass_rate": pass_rate,
-            "region": infer_region(school),
-        })
+        # Fallback: space-delimited format
+        # Format: "1 MAPUA UNIVERSITY 441 411 93.20"
+        match = re.match(r"^\s*(\d+)\s+(.+?)\s+([\d,]+)\s+([\d,]+)\s+([\d.]+)\s*%?\s*$", line, re.I)
+        if match:
+            rank, school, takers, passers, rate = match.groups()
+            schools.append({
+                "rank": int(rank),
+                "school": school.strip(),
+                "takers": int(takers.replace(",", "")),
+                "passers": int(passers.replace(",", "")),
+                "pass_rate": float(rate),
+                "region": infer_region(school),
+            })
     
     return schools
 
