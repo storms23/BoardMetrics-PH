@@ -576,7 +576,7 @@ export async function topByConsistency(limit = 25) {
     .limit(limit);
   if (error) throw error;
   // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] consistency_scores query result", { rowCount: data?.length ?? 0, error: error?.message });
+  console.log("[PASA_DBG H-B,H-C] consistency_scores query result", { rowCount: data?.length ?? 0 });
   // #endregion
 
   const rows = (data ?? []).map((r: any) => ({
