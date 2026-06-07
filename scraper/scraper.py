@@ -487,12 +487,16 @@ def scrape(exam_code: str, year: int) -> None:
         #   2. Top-schools page: has school performance data (PDF/image)
         
         prcboard_slug = PRCBOARD_SLUGS.get(exam_code, exam_code.lower())
-        exam_name_keywords = EXAM_NAMES.get(exam_code, "").lower().split()[:3]  # First 3 words of exam name
+        exam_name = EXAM_NAMES.get(exam_code, "")
+        # Extract key words from exam name (e.g., "Civil Engineers" from "Civil Engineers Licensure Examination")
+        exam_keywords = [w for w in exam_name.split() if len(w) > 4 and w.lower() not in ["licensure", "examination", "exam", "board"]][:3]
         
         # Search for main results pages (contains summary stats)
+        # Use exam name keywords to avoid false matches (e.g., "cele" matches "CPALE")
         main_posts = []
-        for pattern in [f"{prcboard_slug} results {year}", f"{year} {prcboard_slug} list"]:
-            posts = wp_search(pattern, n=30)
+        search_terms = [" ".join(exam_keywords[:2]), exam_code] if exam_keywords else [exam_code]
+        for search_term in search_terms:
+            posts = wp_search(f"{search_term} results {year}", n=30)
             # Filter to main results posts (title starts with exam code + "RESULTS:" or contains "List of Passers")
             main_posts = [
                 p for p in posts 
@@ -507,7 +511,7 @@ def scrape(exam_code: str, year: int) -> None:
                 and not BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().upper().startswith(("TOP SCHOOLS", "TOPNOTCHERS", "TOP 10", "ROOM ASSIGNMENTS"))
             ]
             if main_posts:
-                print(f"  Found {len(main_posts)} main result posts for {exam_code}")
+                print(f"  Found {len(main_posts)} main result posts for {exam_code} (search: {search_term})")
                 break
         
         # Search for top-schools pages (contains school performance PDF)
