@@ -714,12 +714,21 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
             # Try 2: Image extraction (wp-content/uploads images)
             if not schools:
                 soup = BeautifulSoup(html, "html.parser")
-                imgs = soup.find_all("img", src=re.compile(r"wp-content/uploads/.*\.(png|jpe?g)", re.I))
-                print(f"  Found {len(imgs)} images in HTML")
+                # Find all img tags and filter for wp-content/uploads URLs
+                all_imgs = soup.find_all("img")
+                imgs = [img for img in all_imgs if img.get("src") and "wp-content/uploads" in img.get("src", "")]
+                print(f"  Found {len(imgs)} wp-content/uploads images in HTML")
+                
                 for img in imgs[:3]:
                     img_url = img.get("src", "")
-                    if not img_url.startswith("http"):
+                    # Ensure absolute URL
+                    if img_url.startswith("//"):
+                        img_url = "https:" + img_url
+                    elif img_url.startswith("/"):
                         img_url = SITE + img_url
+                    elif not img_url.startswith("http"):
+                        img_url = SITE + "/" + img_url
+                    
                     print(f"  Trying image: {img_url}")
                     schools = ocr_image(img_url, "school")
                     if schools:
@@ -735,8 +744,24 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                         browser = p.chromium.launch(headless=True)
                         page = browser.new_page()
                         page.goto(school_url, timeout=30000, wait_until="networkidle")
-                        page.wait_for_timeout(3000)  # Wait for Drive embed to load
-                        screenshot = page.screenshot(full_page=True)
+                        page.wait_for_timeout(5000)  # Wait for Drive embed to load
+                        
+                        # Try to find and screenshot just the Google Drive iframe content
+                        screenshot = None
+                        try:
+                            # Look for Drive iframe
+                            iframe = page.frame_locator('iframe[src*="drive.google.com"]').first
+                            if iframe:
+                                print(f"  Found Google Drive iframe, screenshotting iframe content...")
+                                screenshot = iframe.locator('body').screenshot(timeout=10000)
+                        except Exception as iframe_err:
+                            print(f"  Could not screenshot iframe: {iframe_err}, falling back to full page")
+                        
+                        # Fallback to full page screenshot
+                        if not screenshot:
+                            print(f"  Screenshotting full page...")
+                            screenshot = page.screenshot(full_page=True)
+                        
                         browser.close()
                         
                         # OCR the screenshot using OCR.space (base64)
