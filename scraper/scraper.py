@@ -23,7 +23,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import db
-from programs import EXAM_NAMES, KEYWORDS, PRCBOARD_SLUGS, ALL_CODES
+from programs import EXAM_NAMES, KEYWORDS, PRCBOARD_SLUGS, ALL_CODES, PROGRAMS_DICT
 from normalize import infer_region
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
@@ -479,7 +479,7 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
     Scrape a specific exam by constructing the URL directly (no WordPress API search).
     Used when we know the month and URL pattern.
     """
-    prog = PROGRAMS.get(exam_code)
+    prog = PROGRAMS_DICT.get(exam_code)
     if not prog:
         print(f"  Unknown exam code: {exam_code}")
         return
@@ -626,7 +626,7 @@ def scrape(exam_code: str, year: int) -> None:
     """
     from programs import EXAM_CYCLES
     
-    prog = PROGRAMS.get(exam_code)
+    prog = PROGRAMS_DICT.get(exam_code)
     if not prog:
         print(f"\n⚠ Unknown exam code: {exam_code}")
         return

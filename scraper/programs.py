@@ -61,6 +61,18 @@ PROGRAMS = [
      ["agriculturist licensure", "agriculture board", "agriculturist"], "agriculture"),
 ]
 
+# Helper dicts for easy lookup
+PROGRAMS_DICT = {
+    p[0]: {
+        "exam_code": p[0],
+        "exam_name": p[1],
+        "level": p[2],
+        "slug": p[3],
+        "keywords": p[4],
+        "prcboard_slug": p[5],
+    }
+    for p in PROGRAMS
+}
 EXAM_NAMES = {p[0]: p[1] for p in PROGRAMS}
 KEYWORDS = {p[0]: p[4] for p in PROGRAMS}
 PRCBOARD_SLUGS = {p[0]: p[5] for p in PROGRAMS}
