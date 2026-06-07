@@ -492,11 +492,14 @@ def scrape(exam_code: str, year: int) -> None:
         exam_keywords = [w for w in exam_name.split() if len(w) > 4 and w.lower() not in ["licensure", "examination", "exam", "board"]][:3]
         
         # Search for main results pages (contains summary stats)
-        # Use exam name keywords to avoid false matches (e.g., "cele" matches "CPALE")
+        # Try multiple search strategies: keywords, slug pattern, exam code
         main_posts = []
+        
+        # Strategy 1: Keyword-based search (e.g., "Civil Engineers results 2026")
         search_terms = [" ".join(exam_keywords[:2]), exam_code] if exam_keywords else [exam_code]
         for search_term in search_terms:
             posts = wp_search(f"{search_term} results {year}", n=30)
+            print(f"  DEBUG: WordPress search '{search_term} results {year}' returned {len(posts)} posts")
             # Filter to main results posts (title starts with exam code + "RESULTS:" or contains "List of Passers")
             main_posts = [
                 p for p in posts 
@@ -504,6 +507,7 @@ def scrape(exam_code: str, year: int) -> None:
                 or ("list of passers" in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
                     and exam_code.lower() in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower())
             ]
+            print(f"  DEBUG: After title filter, {len(main_posts)} posts remain")
             # Exclude alphabetical passer lists (A-C, D-F, etc.) and support pages
             main_posts = [
                 p for p in main_posts
@@ -513,6 +517,24 @@ def scrape(exam_code: str, year: int) -> None:
             if main_posts:
                 print(f"  Found {len(main_posts)} main result posts for {exam_code} (search: {search_term})")
                 break
+        
+        # Strategy 2: If keyword search fails, try finding posts by slug pattern match
+        # prcboard.com uses: /{slug}-results-{month}-{year}-...-list-of-passers
+        if not main_posts:
+            posts = wp_search(f"{prcboard_slug} {year}", n=50)
+            for p in posts:
+                title_lower = BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
+                slug_lower = p.get("slug", "").lower()
+                # Match: title contains "results" and "list of passers", OR slug matches pattern
+                if (("results" in title_lower and "list of passers" in title_lower) 
+                    or f"{prcboard_slug}-results" in slug_lower):
+                    # Exclude support pages and alphabetical lists
+                    if (not re.match(r'^[A-Z]-[A-Z]\s+', BeautifulSoup(p["title"]["rendered"], "html.parser").get_text())
+                        and not BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().upper().startswith(("TOP SCHOOLS", "TOPNOTCHERS", "TOP 10", "ROOM ASSIGNMENTS"))):
+                        main_posts.append(p)
+            if main_posts:
+                print(f"  Found {len(main_posts)} main result posts for {exam_code} (slug pattern match)")
+
         
         # Search for top-schools pages (contains school performance PDF)
         school_posts = []
