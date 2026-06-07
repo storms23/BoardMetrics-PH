@@ -487,21 +487,36 @@ def scrape(exam_code: str, year: int) -> None:
         #   2. Top-schools page: has school performance data (PDF/image)
         
         prcboard_slug = PRCBOARD_SLUGS.get(exam_code, exam_code.lower())
+        exam_name_keywords = EXAM_NAMES.get(exam_code, "").lower().split()[:3]  # First 3 words of exam name
         
         # Search for main results pages (contains summary stats)
         main_posts = []
-        for pattern in [f"{prcboard_slug} results {year}", f"{prcboard_slug} {year} list passers"]:
-            main_posts = wp_search(pattern, n=10)
+        for pattern in [f"{prcboard_slug} results {year}", f"{year} {prcboard_slug} list"]:
+            posts = wp_search(pattern, n=20)
+            # Filter to posts that actually match this exam (title must contain exam code or key exam name words)
+            main_posts = [
+                p for p in posts 
+                if exam_code.lower() in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
+                or any(kw in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower() 
+                       for kw in exam_name_keywords if len(kw) > 4)
+            ]
             if main_posts:
-                print(f"  Found {len(main_posts)} main result posts with: {pattern}")
+                print(f"  Found {len(main_posts)} main result posts for {exam_code}")
                 break
         
         # Search for top-schools pages (contains school performance PDF)
         school_posts = []
         for pattern in [f"top schools {year} {prcboard_slug}", f"{year} {prcboard_slug} performance"]:
-            school_posts = wp_search(pattern, n=10)
+            posts = wp_search(pattern, n=20)
+            # Filter to posts for this specific exam
+            school_posts = [
+                p for p in posts
+                if exam_code.lower() in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
+                or any(kw in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
+                       for kw in exam_name_keywords if len(kw) > 4)
+            ]
             if school_posts:
-                print(f"  Found {len(school_posts)} top-school posts with: {pattern}")
+                print(f"  Found {len(school_posts)} top-school posts for {exam_code}")
                 break
         
         if not main_posts and not school_posts:
