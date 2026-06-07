@@ -492,13 +492,19 @@ def scrape(exam_code: str, year: int) -> None:
         # Search for main results pages (contains summary stats)
         main_posts = []
         for pattern in [f"{prcboard_slug} results {year}", f"{year} {prcboard_slug} list"]:
-            posts = wp_search(pattern, n=20)
-            # Filter to posts that actually match this exam (title must contain exam code or key exam name words)
+            posts = wp_search(pattern, n=30)
+            # Filter to main results posts (title starts with exam code + "RESULTS:" or contains "List of Passers")
             main_posts = [
                 p for p in posts 
-                if exam_code.lower() in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
-                or any(kw in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower() 
-                       for kw in exam_name_keywords if len(kw) > 4)
+                if BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().upper().startswith((exam_code + " RESULTS", prcboard_slug.upper() + " RESULTS"))
+                or ("list of passers" in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower()
+                    and exam_code.lower() in BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().lower())
+            ]
+            # Exclude alphabetical passer lists (A-C, D-F, etc.) and support pages
+            main_posts = [
+                p for p in main_posts
+                if not re.match(r'^[A-Z]-[A-Z]\s+', BeautifulSoup(p["title"]["rendered"], "html.parser").get_text())
+                and not BeautifulSoup(p["title"]["rendered"], "html.parser").get_text().upper().startswith(("TOP SCHOOLS", "TOPNOTCHERS", "TOP 10", "ROOM ASSIGNMENTS"))
             ]
             if main_posts:
                 print(f"  Found {len(main_posts)} main result posts for {exam_code}")
