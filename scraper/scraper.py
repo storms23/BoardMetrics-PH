@@ -23,14 +23,14 @@ import requests
 from bs4 import BeautifulSoup
 
 import db
-from programs import EXAM_NAMES, KEYWORDS, ALL_CODES
+from programs import EXAM_NAMES, KEYWORDS, PRCBOARD_SLUGS, ALL_CODES
 from normalize import infer_region
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 KEY = os.getenv("ANTHROPIC_API_KEY", "")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 PAUSE = 1.5  # be polite to the source server
-SITE = "https://boardexams.ph"
+SITE = "https://www.prcboard.com"
 
 
 # ── DISCOVERY: WordPress REST API ─────────────────────────────────────────────
@@ -83,6 +83,188 @@ def get_date(title: str, text: str = "") -> dict:
             return {"month": m.group(1).capitalize(), "year": int(m.group(2))}
     m = re.search(r"\b(20\d\d)\b", title)
     return {"month": None, "year": int(m.group(1)) if m else None}
+
+
+# ── EXTRACT: Google Drive PDF ─────────────────────────────────────────────────
+def extract_drive_id(html: str) -> str | None:
+    """Extract Google Drive file ID from iframe src or anchor href."""
+    patterns = [
+        r'drive\.google\.com/file/d/([A-Za-z0-9_-]+)',
+        r'drive\.google\.com/uc\?.*id=([A-Za-z0-9_-]+)',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, html)
+        if m:
+            return m.group(1)
+    return None
+
+
+def download_drive_pdf(file_id: str) -> bytes | None:
+    """
+    Download a Google Drive PDF, handling large-file confirmation prompts.
+    Returns raw PDF bytes or None on failure.
+    """
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=60)
+        if r.status_code != 200:
+            return None
+        
+        # Check for virus-scan warning page (large files)
+        if b'confirm' in r.content[:2000] or b'download_warning' in r.content[:2000]:
+            # Extract confirmation token
+            token_match = re.search(rb'confirm=([^&"\']+)', r.content)
+            if token_match:
+                token = token_match.group(1).decode()
+                r = requests.get(f"{url}&confirm={token}", headers=HEADERS, timeout=60)
+        
+        # Verify we got a PDF
+        if r.content[:4] == b'%PDF':
+            return r.content
+        return None
+    except Exception as e:
+        print(f"  Drive download error: {e}")
+        return None
+
+
+def parse_pdf_table(pdf_bytes: bytes) -> list:
+    """
+    Extract school performance table from PDF using pdfplumber.
+    Falls back to Claude OCR if pdfplumber returns empty (scanned PDF).
+    
+    Handles both Format A (4-col) and Format B (14-col PRC standard).
+    """
+    import io
+    try:
+        import pdfplumber
+    except ImportError:
+        print("  pdfplumber not installed; falling back to OCR")
+        return ocr_pdf_claude(pdf_bytes)
+    
+    results = []
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                table = page.extract_table()
+                if not table or len(table) < 2:
+                    continue
+                
+                # Detect format: check if first data row col[0] is a number (seq no)
+                sample_rows = [r for r in table[1:6] if r and len(r) > 1]
+                if not sample_rows:
+                    continue
+                
+                first_vals = [r[0] for r in sample_rows if r[0]]
+                col0_is_seqno = sum(1 for v in first_vals if str(v).strip().isdigit()) >= len(first_vals) // 2
+                
+                for row in table[1:]:  # Skip header
+                    if not row or len(row) < 3:
+                        continue
+                    
+                    if col0_is_seqno:
+                        # Format B: 14-col with seq_no in col[0], school in col[1]
+                        if len(row) < 5:
+                            continue
+                        name = str(row[1]).strip() if row[1] else ""
+                        try:
+                            # Overall stats are in last 4 columns
+                            passers = int(str(row[-4]).replace(",", "").strip())
+                            takers = int(str(row[-2]).replace(",", "").strip())
+                            pr = float(str(row[-1]).replace("%", "").replace(",", "").strip())
+                        except (ValueError, TypeError, AttributeError):
+                            continue
+                    else:
+                        # Format A: 4-col with school in col[0]
+                        name = str(row[0]).strip() if row[0] else ""
+                        try:
+                            takers = int(str(row[1]).replace(",", "").strip())
+                            passers = int(str(row[2]).replace(",", "").strip())
+                            pr_raw = str(row[3] if len(row) > 3 else row[-1])
+                            pr = float(pr_raw.replace("%", "").replace(",", "").strip())
+                        except (ValueError, TypeError, AttributeError):
+                            continue
+                    
+                    if not name:
+                        continue
+                    
+                    # Skip date-like rows, purely numeric names, and header-like rows
+                    if re.match(r"^(January|February|March|April|May|June|July|August|"
+                               r"September|October|November|December|Jan|Feb|Mar|Apr|"
+                               r"Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b", name, re.IGNORECASE):
+                        continue
+                    if re.match(r"^\d+$", name):
+                        continue
+                    if re.match(r"^(School|Institution|Name|Examinee|Passer|Passed|Total|Seq|No\.?)\b",
+                               name, re.IGNORECASE):
+                        continue
+                    
+                    results.append({
+                        "school": name,
+                        "takers": takers,
+                        "passers": passers,
+                        "pass_rate": pr,
+                        "rank": len(results) + 1,
+                        "region": infer_region(name),
+                    })
+    except Exception as e:
+        print(f"  pdfplumber error: {e}")
+    
+    # If pdfplumber found nothing, try Claude OCR (scanned PDF)
+    if not results:
+        print("  pdfplumber returned 0 rows; trying Claude OCR...")
+        return ocr_pdf_claude(pdf_bytes)
+    
+    return results
+
+
+def ocr_pdf_claude(pdf_bytes: bytes) -> list:
+    """Use Claude to OCR a scanned PDF."""
+    if not KEY:
+        print("  No ANTHROPIC_API_KEY; skipping PDF OCR.")
+        return []
+    try:
+        import anthropic
+        b64 = base64.standard_b64encode(pdf_bytes).decode()
+        cl = anthropic.Anthropic(api_key=KEY)
+        msg = cl.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=8192,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract every row from the school performance table. "
+                            "Return ONLY valid JSON, no markdown, no explanation:\n"
+                            '[{"rank":1,"school":"School Name","takers":100,'
+                            '"passers":80,"pass_rate":80.0}]'
+                        ),
+                    },
+                ],
+            }],
+        )
+        txt = re.sub(r"```json|```", "", msg.content[0].text.strip()).strip()
+        data = json.loads(txt)
+        # Add region inference
+        for item in data:
+            if "region" not in item:
+                item["region"] = infer_region(item.get("school", ""))
+        return data
+    except json.JSONDecodeError:
+        print("  PDF OCR returned non-JSON.")
+        return []
+    except Exception as e:
+        print(f"  PDF OCR error: {e}")
+        return []
 
 
 # ── EXTRACT: school table (HTML, with OCR fallback) ───────────────────────────
@@ -199,7 +381,7 @@ def get_images_via_playwright(url: str) -> list:
             time.sleep(2)
             srcs = page.eval_on_selector_all("img", "els => els.map(e => e.src)")
             browser.close()
-        keywords = ["school", "performance", "result", "topnotch"]
+        keywords = ["school", "performance", "result", "topnotch", "image"]
         return [
             s for s in srcs
             if s.startswith("http")
@@ -231,6 +413,10 @@ def ocr_image(image_url: str, mode: str = "school") -> list:
         import anthropic
         raw = requests.get(image_url, timeout=30).content
         b64 = base64.standard_b64encode(raw).decode()
+        
+        # Detect image type from URL extension
+        media_type = "image/png" if image_url.lower().endswith(".png") else "image/jpeg"
+        
         cl = anthropic.Anthropic(api_key=KEY)
         msg = cl.messages.create(
             model="claude-sonnet-4-5",
@@ -239,7 +425,7 @@ def ocr_image(image_url: str, mode: str = "school") -> list:
                 "role": "user",
                 "content": [
                     {"type": "image",
-                     "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+                     "source": {"type": "base64", "media_type": media_type, "data": b64}},
                     {"type": "text", "text": prompts[mode]},
                 ],
             }],
@@ -276,18 +462,29 @@ def scrape(exam_code: str, year: int) -> None:
     job_id = db.start_import_job(exam_code, year)
     affected = 0
     try:
-        # Step 1: discover posts (try each keyword until we hit results)
+        # Step 1: discover posts on prcboard.com (primary source)
         posts = []
-        for kw in KEYWORDS.get(exam_code, [exam_code]):
-            posts = wp_search(f"{kw} {year} performance schools")
+        prcboard_slug = PRCBOARD_SLUGS.get(exam_code, exam_code.lower())
+        
+        # Try common month patterns (prcboard.com uses "march-2026-cele-results" format)
+        search_patterns = [
+            f"top schools {year} {prcboard_slug}",
+            f"{prcboard_slug} {year} results",
+            f"{year} {prcboard_slug} performance",
+        ]
+        
+        for pattern in search_patterns:
+            posts = wp_search(pattern, n=10)
             if posts:
+                print(f"  Found {len(posts)} posts with pattern: {pattern}")
                 break
+        
         if not posts:
-            print("  No posts found.")
+            print("  No posts found on prcboard.com.")
             db.finish_import_job(job_id, "success", 0, "no posts")
             return
 
-        for post in posts[:2]:
+        for post in posts[:3]:  # Check top 3 posts
             title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
             url = post["link"]
             html = wp_get_content(post["id"])
@@ -299,7 +496,6 @@ def scrape(exam_code: str, year: int) -> None:
                 continue
 
             # Skip posts whose extracted year doesn't match the target year
-            # (WordPress search can return posts from other years)
             if date["year"] and abs(date["year"] - year) > 1:
                 print(f"  Skipping post year={date['year']} (target={year}): {title[:60]}")
                 continue
@@ -310,17 +506,41 @@ def scrape(exam_code: str, year: int) -> None:
             eid = db.upsert_exam_result(exam_code, date["month"], date["year"], stats, url)
             db.audit("import", "exam_results", eid, {"exam_code": exam_code, "year": year})
 
-            # School table (HTML → OCR fallback)
-            schools = parse_html_table(html)
+            # ──────────────────────────────────────────────────────────────────
+            # NEW FLOW: Google Drive PDF → pdfplumber → image OCR fallback
+            # ──────────────────────────────────────────────────────────────────
+            schools = []
+            
+            # Try 1: Extract Google Drive PDF embed
+            drive_id = extract_drive_id(html)
+            if drive_id:
+                print(f"  Found Drive PDF: {drive_id}")
+                pdf_bytes = download_drive_pdf(drive_id)
+                if pdf_bytes:
+                    schools = parse_pdf_table(pdf_bytes)
+                    if schools:
+                        print(f"  Extracted {len(schools)} schools from PDF")
+            
+            # Try 2: HTML table (legacy boardexams.ph format)
+            if not schools:
+                schools = parse_html_table(html)
+                if schools:
+                    print(f"  Extracted {len(schools)} schools from HTML table")
+            
+            # Try 3: Image OCR fallback
             if not schools:
                 for img in get_images_via_playwright(url)[:3]:
                     schools = ocr_image(img, "school")
                     if schools:
+                        print(f"  Extracted {len(schools)} schools from image OCR")
                         break
                     time.sleep(0.5)
+            
             if schools:
                 affected += db.upsert_school_performance(eid, schools)
-                print(f"  saved {len(schools)} schools")
+                print(f"  ✓ Saved {len(schools)} schools")
+            else:
+                print("  ⚠ No school data found")
 
             # Topnotchers (text → OCR fallback)
             notch_url = (url.replace("performance-of-schools", "topnotchers")
@@ -337,13 +557,15 @@ def scrape(exam_code: str, year: int) -> None:
                         break
             if tops:
                 db.upsert_topnotchers(eid, tops)
-                print(f"  saved {len(tops)} topnotchers")
+                print(f"  ✓ Saved {len(tops)} topnotchers")
 
             time.sleep(PAUSE)
 
         db.finish_import_job(job_id, "success", affected)
     except Exception as e:
         print(f"  ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         db.finish_import_job(job_id, "failed", affected, str(e))
 
 
