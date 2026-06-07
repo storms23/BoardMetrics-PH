@@ -62,6 +62,25 @@ def wp_get_content(post_id: int) -> str:
 
 # ── EXTRACT: national summary ─────────────────────────────────────────────────
 def get_summary(text: str) -> dict | None:
+    """
+    Extract national exam statistics from text.
+    Handles two formats:
+    - prcboard.com: "6,438 out of 18,370 (35.05%)" 
+    - legacy: "6,438 out of 18,370 passed"
+    """
+    # Try prcboard.com format first (with percentage in parentheses)
+    m = re.search(r"([\d,]+)\s+out\s+of\s+([\d,]+)\s+\(([\d.]+)%?\)", text, re.IGNORECASE)
+    if m:
+        passers = int(m.group(1).replace(",", ""))
+        takers = int(m.group(2).replace(",", ""))
+        pass_rate = float(m.group(3))
+        return {
+            "total_passers": passers,
+            "total_takers": takers,
+            "pass_rate": pass_rate,
+        }
+    
+    # Fallback to legacy format
     m = re.search(r"([\d,]+)\s+out\s+of\s+([\d,]+)\s+passed", text, re.IGNORECASE)
     if not m:
         return None
@@ -462,29 +481,38 @@ def scrape(exam_code: str, year: int) -> None:
     job_id = db.start_import_job(exam_code, year)
     affected = 0
     try:
-        # Step 1: discover posts on prcboard.com (primary source)
-        posts = []
+        # Step 1: discover posts on prcboard.com
+        # prcboard.com has TWO pages per exam:
+        #   1. Main results page: has summary stats ("X out of Y (Z%) passed")
+        #   2. Top-schools page: has school performance data (PDF/image)
+        
         prcboard_slug = PRCBOARD_SLUGS.get(exam_code, exam_code.lower())
         
-        # Try common month patterns (prcboard.com uses "march-2026-cele-results" format)
-        search_patterns = [
-            f"top schools {year} {prcboard_slug}",
-            f"{prcboard_slug} {year} results",
-            f"{year} {prcboard_slug} performance",
-        ]
-        
-        for pattern in search_patterns:
-            posts = wp_search(pattern, n=10)
-            if posts:
-                print(f"  Found {len(posts)} posts with pattern: {pattern}")
+        # Search for main results pages (contains summary stats)
+        main_posts = []
+        for pattern in [f"{prcboard_slug} results {year}", f"{prcboard_slug} {year} list passers"]:
+            main_posts = wp_search(pattern, n=10)
+            if main_posts:
+                print(f"  Found {len(main_posts)} main result posts with: {pattern}")
                 break
         
-        if not posts:
+        # Search for top-schools pages (contains school performance PDF)
+        school_posts = []
+        for pattern in [f"top schools {year} {prcboard_slug}", f"{year} {prcboard_slug} performance"]:
+            school_posts = wp_search(pattern, n=10)
+            if school_posts:
+                print(f"  Found {len(school_posts)} top-school posts with: {pattern}")
+                break
+        
+        if not main_posts and not school_posts:
             print("  No posts found on prcboard.com.")
             db.finish_import_job(job_id, "success", 0, "no posts")
             return
 
-        for post in posts[:3]:  # Check top 3 posts
+        # Step 2: Process main results pages for summary stats
+        processed_exams = set()
+        
+        for post in main_posts[:5]:  # Check top 5 main posts
             title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
             url = post["link"]
             html = wp_get_content(post["id"])
@@ -492,7 +520,9 @@ def scrape(exam_code: str, year: int) -> None:
 
             stats = get_summary(text)
             date = get_date(title, text)
+            
             if not stats:
+                print(f"  No summary stats in: {title[:50]}")
                 continue
 
             # Skip posts whose extracted year doesn't match the target year
@@ -500,18 +530,60 @@ def scrape(exam_code: str, year: int) -> None:
                 print(f"  Skipping post year={date['year']} (target={year}): {title[:60]}")
                 continue
 
+            exam_key = (date["month"], date["year"])
+            if exam_key in processed_exams:
+                continue
+            processed_exams.add(exam_key)
+
             print(f"  {stats['total_passers']:,}/{stats['total_takers']:,} "
                   f"({stats['pass_rate']}%) — {date['month']} {date['year']}")
 
             eid = db.upsert_exam_result(exam_code, date["month"], date["year"], stats, url)
             db.audit("import", "exam_results", eid, {"exam_code": exam_code, "year": year})
 
+        # Step 3: Process top-schools pages for school performance data
+        for post in school_posts[:5]:  # Check top 5 school posts
+            title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
+            url = post["link"]
+            html = wp_get_content(post["id"])
+            text = BeautifulSoup(html, "html.parser").get_text()
+
+            date = get_date(title, text)
+            
+            # Skip posts whose extracted year doesn't match target
+            if date["year"] and abs(date["year"] - year) > 1:
+                print(f"  Skipping school post year={date['year']}: {title[:60]}")
+                continue
+
+            # Find the exam_result record for this exam cycle
+            exam_key = (date["month"], date["year"])
+            if exam_key not in processed_exams:
+                print(f"  No exam record for {date['month']} {date['year']}, skipping schools")
+                continue
+
+            # Get the exam_result_id
+            try:
+                eid_row = db.client().from_("exam_results").select("id").eq(
+                    "program_id", 
+                    db.client().from_("programs").select("id").eq("exam_code", exam_code).single().data["id"]
+                ).eq("month", date["month"]).eq("year", date["year"]).maybe_single().execute()
+                
+                if not eid_row.data:
+                    print(f"  No exam_result_id found for {date['month']} {date['year']}")
+                    continue
+                eid = eid_row.data["id"]
+            except Exception as e:
+                print(f"  Error finding exam_result: {e}")
+                continue
+
+            print(f"  Processing schools for {date['month']} {date['year']}")
+
             # ──────────────────────────────────────────────────────────────────
-            # NEW FLOW: Google Drive PDF → pdfplumber → image OCR fallback
+            # Extract school performance: PDF → HTML → Image OCR
             # ──────────────────────────────────────────────────────────────────
             schools = []
             
-            # Try 1: Extract Google Drive PDF embed
+            # Try 1: Google Drive PDF embed
             drive_id = extract_drive_id(html)
             if drive_id:
                 print(f"  Found Drive PDF: {drive_id}")
@@ -521,7 +593,7 @@ def scrape(exam_code: str, year: int) -> None:
                     if schools:
                         print(f"  Extracted {len(schools)} schools from PDF")
             
-            # Try 2: HTML table (legacy boardexams.ph format)
+            # Try 2: HTML table (legacy format)
             if not schools:
                 schools = parse_html_table(html)
                 if schools:
@@ -542,9 +614,9 @@ def scrape(exam_code: str, year: int) -> None:
             else:
                 print("  ⚠ No school data found")
 
-            # Topnotchers (text → OCR fallback)
-            notch_url = (url.replace("performance-of-schools", "topnotchers")
-                            .replace("top-schools", "topnotchers"))
+            # Topnotchers (try main post URL and top-schools URL)
+            notch_url = (url.replace("top-schools", "topnotchers")
+                            .replace("performance-of-schools", "topnotchers"))
             try:
                 notch_html = requests.get(notch_url, headers=HEADERS, timeout=15).text
             except Exception:
