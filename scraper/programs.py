@@ -5,6 +5,26 @@ Single source of truth for the scraper. To support a new board exam, add ONE
 entry here and a matching row in supabase/seed/seed.sql + src/lib/programs.ts.
 """
 
+# Typical exam cycles (months when each exam is usually held)
+EXAM_CYCLES = {
+    "CPALE": ["May", "October"],
+    "NLE": ["June", "December"],
+    "CLE": ["June", "November"],
+    "CELE": ["March", "November"],
+    "ECE": ["April", "October"],
+    "ELE": ["April", "October"],
+    "MELE": ["April", "October"],
+    "PLE": ["June", "December"],
+    "MTLE": ["March", "September"],
+    "ALE": ["June", "December"],
+    "PhLE": ["August"],
+    "PSY": ["April", "October"],
+    "DLE": ["June"],
+    "AgriLE": ["June", "December"],
+    "LET-E": ["March", "September"],
+    "LET-S": ["March", "September"],
+}
+
 PROGRAMS = [
     # exam_code, name, level, slug, scrape_keywords, prcboard_slug
     ("LET-E",  "Licensure Examination for Teachers (Elementary)", "Elementary", "let-elementary",

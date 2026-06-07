@@ -474,7 +474,184 @@ def parse_topnotchers(html: str) -> list:
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
+def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
+    """
+    Scrape a specific exam by constructing the URL directly (no WordPress API search).
+    Used when we know the month and URL pattern.
+    """
+    prog = PROGRAMS.get(exam_code)
+    if not prog:
+        print(f"  Unknown exam code: {exam_code}")
+        return
+    
+    prcboard_slug = prog["prcboard_slug"]
+    exam_name_slug = prog["exam_name"].lower().replace(" licensure examination", "").replace(" ", "-")
+    
+    # Construct known URL patterns
+    month_lower = month.lower()
+    main_url = f"{SITE}/{prcboard_slug}-results-{month_lower}-{year}-{exam_name_slug}-list-of-passers"
+    school_url = f"{SITE}/top-schools-{month_lower}-{year}-{prcboard_slug}-results"
+    
+    print(f"\n{'='*55}")
+    print(f"  {exam_code} {month} {year} — {prog['exam_name']}")
+    print(f"  Main URL: {main_url}")
+    print(f"  School URL: {school_url}")
+    print(f"{'='*55}")
+    
+    job_id = db.start_import_job(exam_code, year)
+    affected = 0
+    
+    try:
+        # Step 1: Try to fetch main results page for summary stats
+        try:
+            r = requests.get(main_url, headers=HEADERS, timeout=15)
+            if r.status_code == 200:
+                html = r.text
+                text = BeautifulSoup(html, "html.parser").get_text()
+                stats = get_summary(text)
+                if stats:
+                    print(f"  {stats['total_passers']:,}/{stats['total_takers']:,} ({stats['pass_rate']}%)")
+                    eid = db.upsert_exam_result(exam_code, month, year, stats, main_url)
+                    db.audit("import", "exam_results", eid, {"exam_code": exam_code, "year": year, "month": month})
+                else:
+                    print(f"  ⚠ No summary stats found on main page")
+                    # Create a minimal exam_result anyway so we can still save schools
+                    eid = db.upsert_exam_result(exam_code, month, year, 
+                        {"total_passers": 0, "total_takers": 0, "pass_rate": 0.0}, main_url)
+            else:
+                print(f"  ⚠ Main page returned {r.status_code}")
+                # Create minimal exam_result
+                eid = db.upsert_exam_result(exam_code, month, year,
+                    {"total_passers": 0, "total_takers": 0, "pass_rate": 0.0}, main_url)
+        except Exception as e:
+            print(f"  ⚠ Error fetching main page: {e}")
+            # Create minimal exam_result
+            eid = db.upsert_exam_result(exam_code, month, year,
+                {"total_passers": 0, "total_takers": 0, "pass_rate": 0.0}, main_url)
+        
+        # Step 2: Fetch top-schools page and extract school data
+        try:
+            r = requests.get(school_url, headers=HEADERS, timeout=15)
+            if r.status_code != 200:
+                print(f"  ⚠ School page returned {r.status_code}")
+                db.finish_import_job(job_id, "success", 0, f"school page {r.status_code}")
+                return
+            
+            html = r.text
+            schools = []
+            
+            # Try 1: HTML table extraction
+            schools = parse_html_table(html)
+            if schools:
+                print(f"  Extracted {len(schools)} schools from HTML table")
+            
+            # Try 2: Image extraction (wp-content/uploads images)
+            if not schools:
+                soup = BeautifulSoup(html, "html.parser")
+                imgs = soup.find_all("img", src=re.compile(r"wp-content/uploads/.*\.(png|jpe?g)", re.I))
+                for img in imgs[:3]:
+                    img_url = img.get("src", "")
+                    if not img_url.startswith("http"):
+                        img_url = SITE + img_url
+                    print(f"  Trying image: {img_url}")
+                    schools = ocr_image(img_url, "school")
+                    if schools:
+                        print(f"  Extracted {len(schools)} schools from image OCR")
+                        break
+            
+            # Try 3: Playwright screenshot of the page (captures embedded Drive viewer)
+            if not schools:
+                print(f"  Trying Playwright screenshot of school page...")
+                try:
+                    from playwright.sync_api import sync_playwright
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        page = browser.new_page()
+                        page.goto(school_url, timeout=30000, wait_until="networkidle")
+                        page.wait_for_timeout(3000)  # Wait for Drive embed to load
+                        screenshot = page.screenshot(full_page=True)
+                        browser.close()
+                        
+                        # OCR the screenshot
+                        if KEY:
+                            import anthropic
+                            b64 = base64.standard_b64encode(screenshot).decode()
+                            cl = anthropic.Anthropic(api_key=KEY)
+                            msg = cl.messages.create(
+                                model="claude-sonnet-4-5",
+                                max_tokens=8192,
+                                messages=[{
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                                        {"type": "text", "text": (
+                                            "Extract the school performance table. Return ONLY valid JSON:\n"
+                                            '[{"rank":1,"school":"School Name","takers":100,"passers":80,"pass_rate":80.0}]'
+                                        )},
+                                    ],
+                                }],
+                            )
+                            txt = re.sub(r"```json|```", "", msg.content[0].text.strip()).strip()
+                            schools = json.loads(txt)
+                            for item in schools:
+                                if "region" not in item:
+                                    item["region"] = infer_region(item.get("school", ""))
+                            print(f"  Extracted {len(schools)} schools from Playwright screenshot")
+                except Exception as e:
+                    print(f"  Playwright OCR error: {e}")
+            
+            if schools:
+                affected += db.upsert_school_performance(eid, schools)
+                print(f"  ✓ Saved {len(schools)} schools")
+            else:
+                print("  ⚠ No school data found")
+        
+        except Exception as e:
+            print(f"  Error processing schools: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        db.finish_import_job(job_id, "success", affected)
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        db.finish_import_job(job_id, "failed", affected, str(e))
+
+
 def scrape(exam_code: str, year: int) -> None:
+    """
+    Scrape exam results for a given year by trying all typical exam cycles.
+    Uses direct URL construction instead of WordPress API search (which is unreliable).
+    """
+    from programs import EXAM_CYCLES
+    
+    prog = PROGRAMS.get(exam_code)
+    if not prog:
+        print(f"\n⚠ Unknown exam code: {exam_code}")
+        return
+    
+    # Get typical exam months for this program
+    typical_months = EXAM_CYCLES.get(exam_code, ["March", "June", "September", "December"])
+    
+    print(f"\n{'='*55}")
+    print(f"  {exam_code} {year} — {prog['exam_name']}")
+    print(f"  Will try months: {', '.join(typical_months)}")
+    print(f"{'='*55}")
+    
+    success_count = 0
+    for month in typical_months:
+        try:
+            scrape_direct_url(exam_code, year, month)
+            success_count += 1
+        except Exception as e:
+            print(f"  Error scraping {month} {year}: {e}")
+    
+    if success_count == 0:
+        print(f"  ⚠ No data found for {exam_code} {year}")
+
+
+def scrape_legacy(exam_code: str, year: int) -> None:
     name = EXAM_NAMES.get(exam_code, exam_code)
     print(f"\n{'='*55}\n  {exam_code} {year} — {name}\n{'='*55}")
 
