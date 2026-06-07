@@ -137,21 +137,34 @@ def download_drive_pdf(file_id: str) -> bytes | None:
     """
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     try:
+        print(f"  Attempting Drive PDF download: {url[:80]}...")
         r = requests.get(url, headers=HEADERS, timeout=60)
+        print(f"  Drive download status: {r.status_code}, content length: {len(r.content)}")
+        
         if r.status_code != 200:
+            print(f"  ✗ Drive download failed: HTTP {r.status_code}")
             return None
         
         # Check for virus-scan warning page (large files)
         if b'confirm' in r.content[:2000] or b'download_warning' in r.content[:2000]:
+            print(f"  Detected large file confirmation prompt, extracting token...")
             # Extract confirmation token
             token_match = re.search(rb'confirm=([^&"\']+)', r.content)
             if token_match:
                 token = token_match.group(1).decode()
+                print(f"  Retrying with confirmation token...")
                 r = requests.get(f"{url}&confirm={token}", headers=HEADERS, timeout=60)
+                print(f"  Retry status: {r.status_code}, content length: {len(r.content)}")
         
         # Verify we got a PDF
         if r.content[:4] == b'%PDF':
+            print(f"  ✓ Valid PDF received")
             return r.content
+        else:
+            print(f"  ✗ Not a PDF! First 200 bytes: {r.content[:200]}")
+            return None
+    except Exception as e:
+        print(f"  ✗ Drive download error: {e}")
         return None
     except Exception as e:
         print(f"  Drive download error: {e}")
