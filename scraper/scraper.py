@@ -742,12 +742,25 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
             
             schools = []
             
-            # Try 1: HTML table extraction from rendered HTML
-            schools = parse_html_table(html)
-            if schools:
-                print(f"  Extracted {len(schools)} schools from HTML table")
+            # Try 1: Google Drive PDF extraction (FULL performance table - ALL schools)
+            drive_id = extract_drive_id(html)
+            if drive_id:
+                print(f"  Found Drive PDF ID: {drive_id}")
+                pdf_bytes = download_drive_pdf(drive_id)
+                if pdf_bytes:
+                    print(f"  Downloaded PDF ({len(pdf_bytes)} bytes)")
+                    schools = parse_pdf_table(pdf_bytes)
+                    if schools:
+                        print(f"  Extracted {len(schools)} schools from Drive PDF")
             
-            # Try 2: Image extraction from rendered HTML (wp-content/uploads)
+            # Try 2: HTML table extraction from rendered HTML
+            if not schools:
+                schools = parse_html_table(html)
+                if schools:
+                    print(f"  Extracted {len(schools)} schools from HTML table")
+            
+            # Try 3: Image extraction from rendered HTML (wp-content/uploads)
+            # NOTE: These images usually only show TOP performers, not ALL schools
             if not schools:
                 soup = BeautifulSoup(html, "html.parser")
                 all_imgs = soup.find_all("img")
@@ -770,7 +783,7 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                         print(f"  Extracted {len(schools)} schools from image OCR")
                         break
             
-            # Try 3: Screenshot OCR (if we got a screenshot)
+            # Try 4: Screenshot OCR (if we got a screenshot)
             if not schools and screenshot:
                 print(f"  Trying OCR.space on screenshot...")
                 if OCR_SPACE_KEY:
