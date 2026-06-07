@@ -55,6 +55,18 @@ try:
     resp = requests.get(URL, headers=HEADERS, timeout=30)
     html = resp.text
     print(f"   ✓ Got HTML ({len(html)} chars, status {resp.status_code})")
+    
+    # Save HTML for inspection
+    with open("/tmp/scraped_page.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"   ✓ Saved HTML to /tmp/scraped_page.html for inspection")
+    
+    # Show first 2000 chars
+    print(f"\n   First 2000 characters of HTML:")
+    print(f"   {'-' * 60}")
+    print(f"   {html[:2000]}")
+    print(f"   {'-' * 60}")
+    
 except Exception as e:
     print(f"   ✗ Failed to fetch: {e}")
     sys.exit(1)
@@ -163,6 +175,23 @@ try:
         print(f"   Loading {URL}...")
         page.goto(URL, timeout=60000, wait_until="networkidle")
         page.wait_for_timeout(5000)
+        
+        # Get the rendered HTML after JavaScript
+        rendered_html = page.content()
+        with open("/tmp/playwright_rendered.html", "w", encoding="utf-8") as f:
+            f.write(rendered_html)
+        print(f"   ✓ Saved Playwright-rendered HTML ({len(rendered_html)} chars)")
+        
+        # Check for Drive iframe in rendered HTML
+        if "drive.google.com" in rendered_html:
+            print(f"   ✓ Found 'drive.google.com' in rendered HTML!")
+        else:
+            print(f"   ⚠ NO 'drive.google.com' found in rendered HTML")
+        
+        if "wp-content/uploads" in rendered_html:
+            print(f"   ✓ Found 'wp-content/uploads' in rendered HTML!")
+        else:
+            print(f"   ⚠ NO 'wp-content/uploads' found in rendered HTML")
         
         # Try iframe first
         screenshot = None
