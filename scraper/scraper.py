@@ -755,16 +755,42 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
             
             schools = []
             
-            # Try 1: Google Drive PDF extraction (FULL performance table - ALL schools)
+            # Try 1: Google Drive PDF viewer OCR (FULL performance table - ALL schools)
             drive_id = extract_drive_id(html)
             if drive_id:
                 print(f"  Found Drive PDF ID: {drive_id}")
-                pdf_bytes = download_drive_pdf(drive_id)
-                if pdf_bytes:
-                    print(f"  Downloaded PDF ({len(pdf_bytes)} bytes)")
-                    schools = parse_pdf_table(pdf_bytes)
-                    if schools:
-                        print(f"  Extracted {len(schools)} schools from Drive PDF")
+                
+                # Google Drive blocks direct downloads, but we can OCR the viewer page
+                drive_viewer_url = f"https://drive.google.com/file/d/{drive_id}/preview"
+                print(f"  Trying OCR.space on Drive viewer: {drive_viewer_url}")
+                
+                if OCR_SPACE_KEY:
+                    try:
+                        payload = {
+                            "url": drive_viewer_url,
+                            "apikey": OCR_SPACE_KEY,
+                            "language": "eng",
+                            "isTable": "true",
+                            "OCREngine": "3",
+                            "scale": "true",
+                        }
+                        response = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=180)
+                        result = response.json()
+                        
+                        if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
+                            parsed = result["ParsedResults"][0]
+                            if parsed.get("FileParseExitCode") == 1:
+                                text = parsed.get("ParsedText", "")
+                                print(f"  OCR.space extracted {len(text)} characters from Drive viewer")
+                                schools = parse_school_table_from_text(text)
+                                if schools:
+                                    print(f"  Extracted {len(schools)} schools from Drive PDF OCR")
+                            else:
+                                print(f"  OCR.space FileParseExitCode={parsed.get('FileParseExitCode')}")
+                        else:
+                            print(f"  OCR.space error: {result.get('ErrorMessage')}")
+                    except Exception as e:
+                        print(f"  Drive OCR error: {e}")
             
             # Try 2: HTML table extraction from rendered HTML
             if not schools:
