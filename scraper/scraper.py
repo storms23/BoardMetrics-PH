@@ -693,29 +693,66 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
             eid = db.upsert_exam_result(exam_code, month, year,
                 {"total_passers": 0, "total_takers": 0, "pass_rate": 0.0}, main_url)
         
-        # Step 2: Fetch top-schools page and extract school data
+        # Step 2: Fetch top-schools page and extract school data using Playwright (handles JavaScript)
         try:
-            r = requests.get(school_url, headers=HEADERS, timeout=15)
-            if r.status_code != 200:
-                print(f"  ⚠ School page returned {r.status_code}")
-                db.finish_import_job(job_id, "success", 0, f"school page {r.status_code}")
-                return
+            print(f"  Fetching school page with Playwright (handles JavaScript)...")
+            from playwright.sync_api import sync_playwright
             
-            html = r.text
+            html = ""
+            screenshot = None
+            
+            with sync_playwright() as p:
+                # Launch with stealth options
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', '--no-sandbox']
+                )
+                context = browser.new_context(
+                    user_agent=HEADERS["User-Agent"],
+                    viewport={"width": 1920, "height": 1080},
+                    locale='en-US',
+                )
+                page = context.new_page()
+                
+                # Add stealth JavaScript
+                page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                """)
+                
+                # Load the page
+                page.goto(school_url, timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_timeout(8000)  # Long wait for JavaScript to execute
+                
+                # Get rendered HTML
+                html = page.content()
+                print(f"  ✓ Page loaded ({len(html)} chars)")
+                
+                # Check if Cloudflare blocked us
+                if "cloudflare" in html.lower() or "please wait" in html.lower():
+                    print(f"  ⚠ Cloudflare block detected (but HTML may still have images)")
+                else:
+                    # Try to take screenshot if not blocked
+                    try:
+                        screenshot = page.screenshot(full_page=True, timeout=30000)
+                        print(f"  ✓ Screenshot taken ({len(screenshot)} bytes)")
+                    except:
+                        pass
+                
+                browser.close()
+            
             schools = []
             
-            # Try 1: HTML table extraction
+            # Try 1: HTML table extraction from rendered HTML
             schools = parse_html_table(html)
             if schools:
                 print(f"  Extracted {len(schools)} schools from HTML table")
             
-            # Try 2: Image extraction (wp-content/uploads images)
+            # Try 2: Image extraction from rendered HTML (wp-content/uploads)
             if not schools:
                 soup = BeautifulSoup(html, "html.parser")
-                # Find all img tags and filter for wp-content/uploads URLs
                 all_imgs = soup.find_all("img")
                 imgs = [img for img in all_imgs if img.get("src") and "wp-content/uploads" in img.get("src", "")]
-                print(f"  Found {len(imgs)} wp-content/uploads images in HTML")
+                print(f"  Found {len(imgs)} wp-content/uploads images in rendered HTML")
                 
                 for img in imgs[:3]:
                     img_url = img.get("src", "")
@@ -733,94 +770,33 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                         print(f"  Extracted {len(schools)} schools from image OCR")
                         break
             
-            # Try 3: Playwright screenshot of the page (captures embedded Drive viewer)
-            if not schools:
-                print(f"  Trying Playwright screenshot of school page...")
-                try:
-                    from playwright.sync_api import sync_playwright
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
-                        page = browser.new_page()
-                        page.goto(school_url, timeout=30000, wait_until="networkidle")
-                        page.wait_for_timeout(5000)  # Wait for Drive embed to load
+            # Try 3: Screenshot OCR (if we got a screenshot)
+            if not schools and screenshot:
+                print(f"  Trying OCR.space on screenshot...")
+                if OCR_SPACE_KEY:
+                    try:
+                        b64 = base64.standard_b64encode(screenshot).decode()
+                        payload = {
+                            "base64Image": f"data:image/png;base64,{b64}",
+                            "apikey": OCR_SPACE_KEY,
+                            "language": "eng",
+                            "isTable": "true",
+                            "OCREngine": "3",
+                            "scale": "true",
+                        }
+                        response = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
+                        result = response.json()
                         
-                        # Try to find and screenshot just the Google Drive iframe content
-                        screenshot = None
-                        try:
-                            # Look for Drive iframe
-                            iframe = page.frame_locator('iframe[src*="drive.google.com"]').first
-                            if iframe:
-                                print(f"  Found Google Drive iframe, screenshotting iframe content...")
-                                screenshot = iframe.locator('body').screenshot(timeout=10000)
-                        except Exception as iframe_err:
-                            print(f"  Could not screenshot iframe: {iframe_err}, falling back to full page")
-                        
-                        # Fallback to full page screenshot
-                        if not screenshot:
-                            print(f"  Screenshotting full page...")
-                            screenshot = page.screenshot(full_page=True)
-                        
-                        browser.close()
-                        
-                        # OCR the screenshot using OCR.space (base64)
-                        if OCR_SPACE_KEY:
-                            print(f"  Trying OCR.space on Playwright screenshot...")
-                            b64 = base64.standard_b64encode(screenshot).decode()
-                            payload = {
-                                "base64Image": f"data:image/png;base64,{b64}",
-                                "apikey": OCR_SPACE_KEY,
-                                "language": "eng",
-                                "isTable": "true",
-                                "OCREngine": "3",
-                                "scale": "true",
-                            }
-                            response = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
-                            result = response.json()
-                            
-                            print(f"  OCR.space response: OCRExitCode={result.get('OCRExitCode')}, IsErrored={result.get('IsErroredOnProcessing')}")
-                            
-                            if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
-                                parsed = result["ParsedResults"][0]
-                                if parsed.get("FileParseExitCode") == 1:
-                                    text = parsed.get("ParsedText", "")
-                                    print(f"  OCR.space extracted {len(text)} characters from screenshot")
-                                    schools = parse_school_table_from_text(text)
-                                    if schools:
-                                        print(f"  Extracted {len(schools)} schools from Playwright screenshot (OCR.space)")
-                                else:
-                                    print(f"  OCR.space FileParseExitCode={parsed.get('FileParseExitCode')}, Error={parsed.get('ErrorMessage')}")
-                            else:
-                                print(f"  OCR.space processing error: {result.get('ErrorMessage')}")
-                        else:
-                            print(f"  No OCR_SPACE_API_KEY; skipping OCR.space screenshot OCR")
-                        
-                        # Fallback to Claude if OCR.space failed and key is available
-                        if not schools and KEY:
-                            import anthropic
-                            b64 = base64.standard_b64encode(screenshot).decode()
-                            cl = anthropic.Anthropic(api_key=KEY)
-                            msg = cl.messages.create(
-                                model="claude-sonnet-4-5",
-                                max_tokens=8192,
-                                messages=[{
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
-                                        {"type": "text", "text": (
-                                            "Extract the school performance table. Return ONLY valid JSON:\n"
-                                            '[{"rank":1,"school":"School Name","takers":100,"passers":80,"pass_rate":80.0}]'
-                                        )},
-                                    ],
-                                }],
-                            )
-                            txt = re.sub(r"```json|```", "", msg.content[0].text.strip()).strip()
-                            schools = json.loads(txt)
-                            for item in schools:
-                                if "region" not in item:
-                                    item["region"] = infer_region(item.get("school", ""))
-                            print(f"  Extracted {len(schools)} schools from Playwright screenshot (Claude)")
-                except Exception as e:
-                    print(f"  Playwright OCR error: {e}")
+                        if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
+                            parsed = result["ParsedResults"][0]
+                            if parsed.get("FileParseExitCode") == 1:
+                                text = parsed.get("ParsedText", "")
+                                print(f"  OCR.space extracted {len(text)} characters from screenshot")
+                                schools = parse_school_table_from_text(text)
+                                if schools:
+                                    print(f"  Extracted {len(schools)} schools from screenshot OCR")
+                    except Exception as e:
+                        print(f"  Screenshot OCR error: {e}")
             
             if schools:
                 affected += db.upsert_school_performance(eid, schools)
