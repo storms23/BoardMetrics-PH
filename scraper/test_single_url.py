@@ -78,217 +78,223 @@ def parse_school_table_from_text(text: str) -> list:
 print(f"Testing URL: {URL}\n")
 print("=" * 70)
 
-# STEP 1: Fetch the page HTML
-print("\n1. Fetching page HTML...")
-try:
-    resp = requests.get(URL, headers=HEADERS, timeout=30)
-    html = resp.text
-    print(f"   ✓ Got HTML ({len(html)} chars, status {resp.status_code})")
-    
-    # Save HTML for inspection
-    with open("/tmp/scraped_page.html", "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"   ✓ Saved HTML to /tmp/scraped_page.html for inspection")
-    
-    # Show first 2000 chars
-    print(f"\n   First 2000 characters of HTML:")
-    print(f"   {'-' * 60}")
-    print(f"   {html[:2000]}")
-    print(f"   {'-' * 60}")
-    
-except Exception as e:
-    print(f"   ✗ Failed to fetch: {e}")
-    sys.exit(1)
-
-soup = BeautifulSoup(html, "html.parser")
-
-# STEP 2: Try to find Google Drive PDF ID
-print("\n2. Looking for Google Drive PDF...")
-drive_id = None
-try:
-    # Check iframes
-    for iframe in soup.find_all("iframe"):
-        src = iframe.get("src", "")
-        m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", src)
-        if m:
-            drive_id = m.group(1)
-            print(f"   ✓ Found Drive ID in iframe: {drive_id}")
-            break
-    
-    # Check links if no iframe
-    if not drive_id:
-        for a in soup.find_all("a", href=True):
-            m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", a["href"])
-            if m:
-                drive_id = m.group(1)
-                print(f"   ✓ Found Drive ID in link: {drive_id}")
-                break
-    
-    if not drive_id:
-        print("   ⚠ No Google Drive ID found")
-except Exception as e:
-    print(f"   ✗ Error: {e}")
-
-# STEP 3: Try to find wp-content/uploads images
-print("\n3. Looking for wp-content/uploads images...")
-try:
-    all_imgs = soup.find_all("img")
-    wp_imgs = [img for img in all_imgs if img.get("src") and "wp-content/uploads" in img.get("src", "")]
-    print(f"   Found {len(wp_imgs)} wp-content/uploads images")
-    
-    for idx, img in enumerate(wp_imgs[:3], 1):
-        img_url = img.get("src", "")
-        # Ensure absolute URL
-        if img_url.startswith("//"):
-            img_url = "https:" + img_url
-        elif img_url.startswith("/"):
-            img_url = SITE + img_url
-        elif not img_url.startswith("http"):
-            img_url = SITE + "/" + img_url
-        
-        print(f"   [{idx}] {img_url}")
-        
-        # Try OCR.space on this image
-        if OCR_SPACE_KEY:
-            print(f"       Trying OCR.space...")
-            try:
-                payload = {
-                    "url": img_url,
-                    "apikey": OCR_SPACE_KEY,
-                    "language": "eng",
-                    "isTable": "true",
-                    "OCREngine": "3",
-                    "scale": "true",
-                }
-                ocr_resp = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
-                result = ocr_resp.json()
-                
-                if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
-                    parsed = result["ParsedResults"][0]
-                    if parsed.get("FileParseExitCode") == 1:
-                        text = parsed.get("ParsedText", "")
-                        print(f"       ✓ OCR.space extracted {len(text)} characters")
-                        schools = parse_school_table_from_text(text)
-                        if schools:
-                            print(f"       ✓ ✓ ✓ EXTRACTED {len(schools)} SCHOOLS!")
-                            print(f"\n       Sample schools:")
-                            for s in schools[:5]:
-                                print(f"         {s['rank']}. {s['school']} - {s['pass_rate']}%")
-                            print(f"\n       ✅ SUCCESS! Image OCR works!")
-                            sys.exit(0)
-                        else:
-                            print(f"       ⚠ Could not parse schools from OCR text")
-                            print(f"       First 500 chars: {text[:500]}")
-                    else:
-                        print(f"       ✗ FileParseExitCode={parsed.get('FileParseExitCode')}")
-                else:
-                    print(f"       ✗ OCR error: {result.get('ErrorMessage')}")
-            except Exception as e:
-                print(f"       ✗ OCR error: {e}")
-        else:
-            print(f"       (No OCR_SPACE_API_KEY)")
-
-except Exception as e:
-    print(f"   ✗ Error: {e}")
-
-# STEP 4: Try Playwright screenshot (last resort)
-print("\n4. Trying Playwright screenshot (this may take 30-60s)...")
+# STEP 1: Fetch the page HTML with Playwright (handles JavaScript + avoids some blocks)
+print("\n1. Fetching page with Playwright (handles JavaScript)...")
+screenshot = None
+rendered_html = ""
 try:
     from playwright.sync_api import sync_playwright
     
     with sync_playwright() as p:
         print("   Launching browser...")
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # Use non-headless mode simulation to avoid detection
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+            ]
+        )
+        context = browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            viewport={"width": 1920, "height": 1080},
+            locale='en-US',
+        )
+        page = context.new_page()
+        
+        # Add stealth JavaScript
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
         
         print(f"   Loading {URL}...")
-        page.goto(URL, timeout=60000, wait_until="networkidle")
-        page.wait_for_timeout(5000)
+        page.goto(URL, timeout=60000, wait_until="domcontentloaded")
+        page.wait_for_timeout(8000)  # Long wait for content to load
         
-        # Get the rendered HTML after JavaScript
+        # Get the rendered HTML
         rendered_html = page.content()
+        print(f"   ✓ Page loaded ({len(rendered_html)} chars)")
+        
+        # Save for inspection
         with open("/tmp/playwright_rendered.html", "w", encoding="utf-8") as f:
             f.write(rendered_html)
-        print(f"   ✓ Saved Playwright-rendered HTML ({len(rendered_html)} chars)")
         
-        # Check for Drive iframe in rendered HTML
-        if "drive.google.com" in rendered_html:
-            print(f"   ✓ Found 'drive.google.com' in rendered HTML!")
-        else:
-            print(f"   ⚠ NO 'drive.google.com' found in rendered HTML")
+        # Check for content
+        has_drive = "drive.google.com" in rendered_html
+        has_wp = "wp-content/uploads" in rendered_html
+        has_cloudflare = "cloudflare" in rendered_html.lower() or "please wait" in rendered_html.lower()
         
-        if "wp-content/uploads" in rendered_html:
-            print(f"   ✓ Found 'wp-content/uploads' in rendered HTML!")
-        else:
-            print(f"   ⚠ NO 'wp-content/uploads' found in rendered HTML")
+        print(f"   Drive iframe: {'✓' if has_drive else '✗'}")
+        print(f"   wp-content images: {'✓' if has_wp else '✗'}")
+        print(f"   Cloudflare block: {'✓ (BLOCKED!)' if has_cloudflare else '✗'}")
         
-        # Try iframe first
-        screenshot = None
-        try:
-            print("   Looking for Drive iframe...")
-            iframe = page.frame_locator('iframe[src*="drive.google.com"]').first
-            if iframe:
-                print("   Screenshotting iframe content...")
-                screenshot = iframe.locator('body').screenshot(timeout=15000)
-                print(f"   ✓ Got iframe screenshot ({len(screenshot)} bytes)")
-        except Exception as e:
-            print(f"   ⚠ Iframe screenshot failed: {e}")
-        
-        # Fallback to full page
-        if not screenshot:
-            print("   Screenshotting full page...")
-            screenshot = page.screenshot(full_page=True, timeout=60000)
-            print(f"   ✓ Got full page screenshot ({len(screenshot)} bytes)")
+        # Take screenshot anyway
+        if not has_cloudflare:
+            screenshot = page.screenshot(full_page=True, timeout=30000)
+            print(f"   ✓ Screenshot taken ({len(screenshot)} bytes)")
         
         browser.close()
-        
-        # Try OCR.space on screenshot
-        if OCR_SPACE_KEY:
-            print("   Trying OCR.space on screenshot...")
-            try:
-                b64 = base64.standard_b64encode(screenshot).decode()
-                payload = {
-                    "base64Image": f"data:image/png;base64,{b64}",
-                    "apikey": OCR_SPACE_KEY,
-                    "language": "eng",
-                    "isTable": "true",
-                    "OCREngine": "3",
-                    "scale": "true",
-                }
-                ocr_resp = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
-                result = ocr_resp.json()
-                
-                if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
-                    parsed = result["ParsedResults"][0]
-                    if parsed.get("FileParseExitCode") == 1:
-                        text = parsed.get("ParsedText", "")
-                        print(f"   ✓ OCR.space extracted {len(text)} characters")
-                        schools = parse_school_table_from_text(text)
-                        if schools:
-                            print(f"   ✓ ✓ ✓ EXTRACTED {len(schools)} SCHOOLS!")
-                            print(f"\n   Sample schools:")
-                            for s in schools[:5]:
-                                print(f"     {s['rank']}. {s['school']} - {s['pass_rate']}%")
-                            print(f"\n   ✅ SUCCESS! Playwright screenshot OCR works!")
-                            sys.exit(0)
-                        else:
-                            print(f"   ⚠ Could not parse schools from OCR text")
-                            print(f"   First 1000 chars: {text[:1000]}")
-                    else:
-                        print(f"   ✗ FileParseExitCode={parsed.get('FileParseExitCode')}")
-                else:
-                    print(f"   ✗ OCR error: {result.get('ErrorMessage')}")
-            except Exception as e:
-                print(f"   ✗ OCR error: {e}")
-        
+
 except Exception as e:
     print(f"   ✗ Playwright error: {e}")
+    rendered_html = ""
+
+# Use rendered HTML for parsing
+html = rendered_html if rendered_html else ""
+if not html:
+    print("   Falling back to requests.get...")
+    try:
+        resp = requests.get(URL, headers=HEADERS, timeout=30)
+        html = resp.text
+        print(f"   ✓ Got HTML ({len(html)} chars, status {resp.status_code})")
+    except Exception as e:
+        print(f"   ✗ Failed to fetch: {e}")
+        sys.exit(1)
+
+# STEP 2: Use screenshot if we got one from Playwright
+if screenshot:
+    print("\n2. Using Playwright screenshot from step 1...")
+    if OCR_SPACE_KEY:
+        print("   Trying OCR.space...")
+        try:
+            b64 = base64.standard_b64encode(screenshot).decode()
+            payload = {
+                "base64Image": f"data:image/png;base64,{b64}",
+                "apikey": OCR_SPACE_KEY,
+                "language": "eng",
+                "isTable": "true",
+                "OCREngine": "3",
+                "scale": "true",
+            }
+            ocr_resp = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
+            result = ocr_resp.json()
+            
+            if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
+                parsed = result["ParsedResults"][0]
+                if parsed.get("FileParseExitCode") == 1:
+                    text = parsed.get("ParsedText", "")
+                    print(f"   ✓ OCR.space extracted {len(text)} characters")
+                    schools = parse_school_table_from_text(text)
+                    if schools:
+                        print(f"   ✓ ✓ ✓ EXTRACTED {len(schools)} SCHOOLS FROM SCREENSHOT!")
+                        print(f"\n   Sample schools:")
+                        for s in schools[:5]:
+                            print(f"     {s['rank']}. {s['school']} - {s['pass_rate']}%")
+                        print(f"\n   ✅ SUCCESS!")
+                        sys.exit(0)
+                    else:
+                        print(f"   ⚠ Could not parse schools")
+                        print(f"   First 1000 chars: {text[:1000]}")
+        except Exception as e:
+            print(f"   ✗ OCR error: {e}")
+else:
+    print("\n2. No screenshot from Playwright (skipping)")
+
+soup = BeautifulSoup(html, "html.parser") if html else None
+
+# STEP 3: Try to find Google Drive PDF ID
+print("\n3. Looking for Google Drive PDF...")
+if soup:
+    drive_id = None
+    try:
+        # Check iframes
+        for iframe in soup.find_all("iframe"):
+            src = iframe.get("src", "")
+            m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", src)
+            if m:
+                drive_id = m.group(1)
+                print(f"   ✓ Found Drive ID in iframe: {drive_id}")
+                break
+        
+        # Check links if no iframe
+        if not drive_id:
+            for a in soup.find_all("a", href=True):
+                m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", a["href"])
+                if m:
+                    drive_id = m.group(1)
+                    print(f"   ✓ Found Drive ID in link: {drive_id}")
+                    break
+        
+        if not drive_id:
+            print("   ⚠ No Google Drive ID found")
+    except Exception as e:
+        print(f"   ✗ Error: {e}")
+else:
+    print("   ✗ No HTML to parse")
+
+# STEP 4: Try to find wp-content/uploads images
+print("\n4. Looking for wp-content/uploads images...")
+if soup:
+    try:
+        all_imgs = soup.find_all("img")
+        wp_imgs = [img for img in all_imgs if img.get("src") and "wp-content/uploads" in img.get("src", "")]
+        print(f"   Found {len(wp_imgs)} wp-content/uploads images")
+        
+        for idx, img in enumerate(wp_imgs[:3], 1):
+            img_url = img.get("src", "")
+            # Ensure absolute URL
+            if img_url.startswith("//"):
+                img_url = "https:" + img_url
+            elif img_url.startswith("/"):
+                img_url = SITE + img_url
+            elif not img_url.startswith("http"):
+                img_url = SITE + "/" + img_url
+            
+            print(f"   [{idx}] {img_url}")
+            
+            # Try OCR.space on this image
+            if OCR_SPACE_KEY:
+                print(f"       Trying OCR.space...")
+                try:
+                    payload = {
+                        "url": img_url,
+                        "apikey": OCR_SPACE_KEY,
+                        "language": "eng",
+                        "isTable": "true",
+                        "OCREngine": "3",
+                        "scale": "true",
+                    }
+                    ocr_resp = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
+                    result = ocr_resp.json()
+                    
+                    if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
+                        parsed = result["ParsedResults"][0]
+                        if parsed.get("FileParseExitCode") == 1:
+                            text = parsed.get("ParsedText", "")
+                            print(f"       ✓ OCR.space extracted {len(text)} characters")
+                            schools = parse_school_table_from_text(text)
+                            if schools:
+                                print(f"       ✓ ✓ ✓ EXTRACTED {len(schools)} SCHOOLS FROM IMAGE!")
+                                print(f"\n       Sample schools:")
+                                for s in schools[:5]:
+                                    print(f"         {s['rank']}. {s['school']} - {s['pass_rate']}%")
+                                print(f"\n       ✅ SUCCESS! Image OCR works!")
+                                sys.exit(0)
+                            else:
+                                print(f"       ⚠ Could not parse schools from OCR text")
+                                print(f"       First 500 chars: {text[:500]}")
+                        else:
+                            print(f"       ✗ FileParseExitCode={parsed.get('FileParseExitCode')}")
+                    else:
+                        print(f"       ✗ OCR error: {result.get('ErrorMessage')}")
+                except Exception as e:
+                    print(f"       ✗ OCR error: {e}")
+            else:
+                print(f"       (No OCR_SPACE_API_KEY)")
+
+    except Exception as e:
+        print(f"   ✗ Error: {e}")
+else:
+    print("   ✗ No HTML to parse")
 
 print("\n" + "=" * 70)
 print("❌ All extraction methods failed for this URL")
 print("\nDEBUG INFO COLLECTED:")
-print(f"  - Page loads: {resp.status_code}")
-print(f"  - HTML size: {len(html)} chars")
+print(f"  - Page loads: Yes ({len(html)} chars)")
+print(f"  - Screenshot taken: {'Yes' if screenshot else 'No'}")
 print(f"  - Drive ID found: {drive_id or 'No'}")
-print(f"  - wp-content images found: {len(wp_imgs)}")
+print(f"  - wp-content images found: {len(wp_imgs) if soup else 0}")
 print(f"  - OCR.space API key: {'Yes' if OCR_SPACE_KEY else 'No'}")
