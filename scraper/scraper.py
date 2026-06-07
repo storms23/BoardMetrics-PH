@@ -434,6 +434,7 @@ def ocr_image_ocrspace(image_url: str, mode: str = "school") -> list:
         return []
     
     try:
+        print(f"  Trying OCR.space on: {image_url[:80]}...")
         payload = {
             "url": image_url,
             "apikey": OCR_SPACE_KEY,
@@ -450,20 +451,28 @@ def ocr_image_ocrspace(image_url: str, mode: str = "school") -> list:
         )
         result = response.json()
         
+        print(f"  OCR.space response: OCRExitCode={result.get('OCRExitCode')}, IsErrored={result.get('IsErroredOnProcessing')}")
+        
         if result.get("IsErroredOnProcessing"):
             print(f"  OCR.space error: {result.get('ErrorMessage')}")
             return []
         
         parsed_results = result.get("ParsedResults", [])
-        if not parsed_results or parsed_results[0].get("FileParseExitCode") != 1:
-            print(f"  OCR.space parse failed: {parsed_results[0].get('ErrorMessage') if parsed_results else 'No results'}")
+        if not parsed_results:
+            print(f"  OCR.space: No ParsedResults")
+            return []
+            
+        exit_code = parsed_results[0].get("FileParseExitCode")
+        if exit_code != 1:
+            print(f"  OCR.space parse failed: FileParseExitCode={exit_code}, Error={parsed_results[0].get('ErrorMessage')}")
             return []
         
         text = parsed_results[0].get("ParsedText", "")
         if not text:
+            print(f"  OCR.space: Empty ParsedText")
             return []
         
-        print(f"  OCR.space extracted {len(text)} characters")
+        print(f"  OCR.space extracted {len(text)} characters, {len(text.split())} words")
         
         # Parse the OCR text into structured data
         # For school mode: extract table rows
@@ -473,7 +482,9 @@ def ocr_image_ocrspace(image_url: str, mode: str = "school") -> list:
             return parse_topnotcher_from_text(text)
             
     except Exception as e:
-        print(f"  OCR.space error: {e}")
+        print(f"  OCR.space exception: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -730,6 +741,7 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                         
                         # OCR the screenshot using OCR.space (base64)
                         if OCR_SPACE_KEY:
+                            print(f"  Trying OCR.space on Playwright screenshot...")
                             b64 = base64.standard_b64encode(screenshot).decode()
                             payload = {
                                 "base64Image": f"data:image/png;base64,{b64}",
@@ -742,13 +754,22 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                             response = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
                             result = response.json()
                             
+                            print(f"  OCR.space response: OCRExitCode={result.get('OCRExitCode')}, IsErrored={result.get('IsErroredOnProcessing')}")
+                            
                             if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
                                 parsed = result["ParsedResults"][0]
                                 if parsed.get("FileParseExitCode") == 1:
                                     text = parsed.get("ParsedText", "")
+                                    print(f"  OCR.space extracted {len(text)} characters from screenshot")
                                     schools = parse_school_table_from_text(text)
                                     if schools:
                                         print(f"  Extracted {len(schools)} schools from Playwright screenshot (OCR.space)")
+                                else:
+                                    print(f"  OCR.space FileParseExitCode={parsed.get('FileParseExitCode')}, Error={parsed.get('ErrorMessage')}")
+                            else:
+                                print(f"  OCR.space processing error: {result.get('ErrorMessage')}")
+                        else:
+                            print(f"  No OCR_SPACE_API_KEY; skipping OCR.space screenshot OCR")
                         
                         # Fallback to Claude if OCR.space failed and key is available
                         if not schools and KEY:
