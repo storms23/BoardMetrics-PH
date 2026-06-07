@@ -28,6 +28,7 @@ from normalize import infer_region
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OCR_SPACE_KEY = os.getenv("OCR_SPACE_API_KEY", "K87217505288957")  # Default to provided key
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -423,9 +424,152 @@ def get_images_via_playwright(url: str) -> list:
         return []
 
 
+def ocr_image_ocrspace(image_url: str, mode: str = "school") -> list:
+    """
+    OCR an image using OCR.space API (free tier: 25,000/month).
+    Engine 3 is used for best table recognition.
+    """
+    if not OCR_SPACE_KEY:
+        print("  No OCR_SPACE_API_KEY set; skipping OCR.space.")
+        return []
+    
+    try:
+        payload = {
+            "url": image_url,
+            "apikey": OCR_SPACE_KEY,
+            "language": "eng",
+            "isTable": "true",  # Line-by-line parsing for tables
+            "OCREngine": "3",   # Engine 3: best for tables (returns Markdown)
+            "scale": "true",    # Upscale for better accuracy
+        }
+        
+        response = requests.post(
+            "https://api.ocr.space/parse/image",
+            data=payload,
+            timeout=60
+        )
+        result = response.json()
+        
+        if result.get("IsErroredOnProcessing"):
+            print(f"  OCR.space error: {result.get('ErrorMessage')}")
+            return []
+        
+        parsed_results = result.get("ParsedResults", [])
+        if not parsed_results or parsed_results[0].get("FileParseExitCode") != 1:
+            print(f"  OCR.space parse failed: {parsed_results[0].get('ErrorMessage') if parsed_results else 'No results'}")
+            return []
+        
+        text = parsed_results[0].get("ParsedText", "")
+        if not text:
+            return []
+        
+        print(f"  OCR.space extracted {len(text)} characters")
+        
+        # Parse the OCR text into structured data
+        # For school mode: extract table rows
+        if mode == "school":
+            return parse_school_table_from_text(text)
+        else:  # topnotcher mode
+            return parse_topnotcher_from_text(text)
+            
+    except Exception as e:
+        print(f"  OCR.space error: {e}")
+        return []
+
+
+def parse_school_table_from_text(text: str) -> list:
+    """Parse school performance table from OCR text."""
+    schools = []
+    lines = text.strip().split("\n")
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Try to extract: rank, school name, takers, passers, pass_rate
+        # Common patterns:
+        # "1 UNIVERSITY OF SANTO TOMAS 100 95 95.00%"
+        # "1 | UNIVERSITY OF SANTO TOMAS | 100 | 95 | 95.00%"
+        
+        # Remove common table separators
+        line = line.replace("|", " ").replace("\t", " ")
+        
+        # Extract numbers (rank, takers, passers, percentage)
+        import re
+        numbers = re.findall(r"[\d,]+\.?\d*", line)
+        if len(numbers) < 3:  # Need at least rank, takers, passers
+            continue
+        
+        # Try to extract school name (text between first number and subsequent numbers)
+        match = re.match(r"^\s*(\d+)\s+(.+?)\s+([\d,]+)\s+([\d,]+)\s+([\d.]+)", line)
+        if not match:
+            continue
+        
+        rank, school, takers, passers, pass_rate = match.groups()
+        
+        # Clean up
+        school = school.strip()
+        takers = int(takers.replace(",", ""))
+        passers = int(passers.replace(",", ""))
+        pass_rate = float(pass_rate)
+        
+        # Skip header rows
+        if "school" in school.lower() or "institution" in school.lower():
+            continue
+        
+        schools.append({
+            "rank": int(rank),
+            "school": school,
+            "takers": takers,
+            "passers": passers,
+            "pass_rate": pass_rate,
+            "region": infer_region(school),
+        })
+    
+    return schools
+
+
+def parse_topnotcher_from_text(text: str) -> list:
+    """Parse topnotchers list from OCR text."""
+    topnotchers = []
+    lines = text.strip().split("\n")
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Pattern: "1 DELA CRUZ, JUAN A. UNIVERSITY OF XYZ 92.50"
+        import re
+        match = re.match(r"^\s*(\d+)\s+([A-Z\s,.-]+?)\s+([A-Z\s.-]+?)\s+([\d.]+)", line)
+        if not match:
+            continue
+        
+        rank, name, school, rating = match.groups()
+        
+        topnotchers.append({
+            "rank": int(rank),
+            "name": name.strip(),
+            "school": school.strip(),
+            "rating": float(rating),
+        })
+    
+    return topnotchers
+
+
 def ocr_image(image_url: str, mode: str = "school") -> list:
+    """
+    OCR an image using OCR.space first, then fall back to Claude if needed.
+    """
+    # Try OCR.space first (free, fast, good for tables)
+    schools = ocr_image_ocrspace(image_url, mode)
+    if schools:
+        return schools
+    
+    # Fall back to Claude Vision OCR (requires credits)
     if not KEY:
-        print("  No ANTHROPIC_API_KEY set; skipping OCR.")
+        print("  No ANTHROPIC_API_KEY set; skipping Claude OCR fallback.")
         return []
     prompts = {
         "school": (
@@ -560,6 +704,7 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
             if not schools:
                 soup = BeautifulSoup(html, "html.parser")
                 imgs = soup.find_all("img", src=re.compile(r"wp-content/uploads/.*\.(png|jpe?g)", re.I))
+                print(f"  Found {len(imgs)} images in HTML")
                 for img in imgs[:3]:
                     img_url = img.get("src", "")
                     if not img_url.startswith("http"):
@@ -583,8 +728,30 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                         screenshot = page.screenshot(full_page=True)
                         browser.close()
                         
-                        # OCR the screenshot
-                        if KEY:
+                        # OCR the screenshot using OCR.space (base64)
+                        if OCR_SPACE_KEY:
+                            b64 = base64.standard_b64encode(screenshot).decode()
+                            payload = {
+                                "base64Image": f"data:image/png;base64,{b64}",
+                                "apikey": OCR_SPACE_KEY,
+                                "language": "eng",
+                                "isTable": "true",
+                                "OCREngine": "3",
+                                "scale": "true",
+                            }
+                            response = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=120)
+                            result = response.json()
+                            
+                            if not result.get("IsErroredOnProcessing") and result.get("ParsedResults"):
+                                parsed = result["ParsedResults"][0]
+                                if parsed.get("FileParseExitCode") == 1:
+                                    text = parsed.get("ParsedText", "")
+                                    schools = parse_school_table_from_text(text)
+                                    if schools:
+                                        print(f"  Extracted {len(schools)} schools from Playwright screenshot (OCR.space)")
+                        
+                        # Fallback to Claude if OCR.space failed and key is available
+                        if not schools and KEY:
                             import anthropic
                             b64 = base64.standard_b64encode(screenshot).decode()
                             cl = anthropic.Anthropic(api_key=KEY)
@@ -607,7 +774,7 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
                             for item in schools:
                                 if "region" not in item:
                                     item["region"] = infer_region(item.get("school", ""))
-                            print(f"  Extracted {len(schools)} schools from Playwright screenshot")
+                            print(f"  Extracted {len(schools)} schools from Playwright screenshot (Claude)")
                 except Exception as e:
                     print(f"  Playwright OCR error: {e}")
             
