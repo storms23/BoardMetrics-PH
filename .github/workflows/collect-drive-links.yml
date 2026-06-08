@@ -1,0 +1,51 @@
+name: Collect Drive Links
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: "First year to scan"
+        required: true
+        default: "2015"
+      end_year:
+        description: "Last year to scan"
+        required: true
+        default: "2026"
+      exam_code:
+        description: "Optional single exam code (blank = all 16)"
+        required: false
+        default: ""
+
+jobs:
+  collect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Collect Google Drive links
+        working-directory: scraper
+        run: |
+          ARGS="${{ github.event.inputs.start_year }} ${{ github.event.inputs.end_year }}"
+          if [ -n "${{ github.event.inputs.exam_code }}" ]; then
+            ARGS="$ARGS ${{ github.event.inputs.exam_code }}"
+          fi
+          python collect_drive_links.py $ARGS --out output
+
+      - name: Upload link lists
+        uses: actions/upload-artifact@v4
+        with:
+          name: drive-links-${{ github.event.inputs.start_year }}-${{ github.event.inputs.end_year }}
+          path: scraper/output/
+          retention-days: 30
