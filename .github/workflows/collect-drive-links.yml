@@ -15,6 +15,10 @@ on:
         description: "Optional single exam code (blank = all 16)"
         required: false
         default: ""
+      mode:
+        description: "discover (WP search), constructed (guess URLs), or both"
+        required: false
+        default: "discover"
 
 jobs:
   collect:
@@ -41,7 +45,7 @@ jobs:
           if [ -n "${{ github.event.inputs.exam_code }}" ]; then
             ARGS="$ARGS ${{ github.event.inputs.exam_code }}"
           fi
-          python collect_drive_links.py $ARGS --out output
+          python collect_drive_links.py $ARGS --mode ${{ github.event.inputs.mode || 'discover' }} --out output
 
       - name: Upload link lists
         uses: actions/upload-artifact@v4

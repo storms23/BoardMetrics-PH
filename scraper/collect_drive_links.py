@@ -62,6 +62,89 @@ def extract_drive_ids(html: str) -> list[str]:
     return ids
 
 
+def wp_search(keyword: str, n: int = 100) -> list[dict]:
+    try:
+        resp = requests.get(
+            f"{SITE}/wp-json/wp/v2/posts",
+            params={"search": keyword, "per_page": n, "_fields": "id,title,link,date"},
+            headers=HEADERS,
+            timeout=20,
+        )
+        posts = resp.json()
+        return posts if isinstance(posts, list) else []
+    except Exception as exc:
+        print(f"  WP API error: {exc}")
+        return []
+
+
+def post_title(post: dict) -> str:
+    title = post.get("title", "")
+    if isinstance(title, dict):
+        return title.get("rendered", "")
+    return str(title)
+
+
+def discover_top_school_pages(
+    exam_codes: list[str],
+    start_year: int,
+    end_year: int,
+) -> list[dict]:
+    """Find real top-schools URLs via WordPress search (better than URL guessing)."""
+    candidates: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for exam_code in exam_codes:
+        prog = PROGRAMS_DICT[exam_code]
+        slug = prog["prcboard_slug"]
+        queries = [
+            f"top schools {slug}",
+            f"TOP SCHOOLS {slug}",
+            f"top-schools {slug}",
+        ]
+        posts: list[dict] = []
+        for q in queries:
+            posts.extend(wp_search(q, n=100))
+            time.sleep(0.5)
+
+        for post in posts:
+            url = post.get("link", "")
+            title = post_title(post)
+            if not url or url in seen_urls:
+                continue
+            if "top-schools" not in url.lower() and "top schools" not in title.lower():
+                continue
+
+            year_match = re.search(r"\b(20\d{2})\b", f"{title} {url}")
+            if not year_match:
+                continue
+            year = int(year_match.group(1))
+            if year < start_year or year > end_year:
+                continue
+
+            month_match = re.search(
+                r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+                title,
+                re.I,
+            )
+            month = month_match.group(1).title() if month_match else ""
+
+            seen_urls.add(url)
+            candidates.append(
+                {
+                    "exam_code": exam_code,
+                    "exam_name": prog["exam_name"],
+                    "year": year,
+                    "month": month,
+                    "school_page_url": url,
+                    "discovered_via": "wp_search",
+                }
+            )
+
+        print(f"  {exam_code}: {sum(1 for c in candidates if c['exam_code'] == exam_code)} pages via WP search")
+
+    return candidates
+
+
 def fetch_html_requests(url: str) -> tuple[int, str]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)
@@ -108,7 +191,89 @@ def fetch_html_playwright(url: str) -> tuple[int, str]:
         return 0, ""
 
 
-def collect(
+def resolve_drive_for_page(
+    exam_code: str,
+    exam_name: str,
+    year: int,
+    month: str,
+    url: str,
+    force_playwright: bool,
+    discovered_via: str = "constructed",
+) -> dict:
+    print(f"\n{exam_code} {month} {year}")
+    print(f"  {url}")
+
+    status, html = fetch_html_requests(url)
+    method = "requests"
+
+    if status == 404:
+        print("  ⚠ page not found (404)")
+        return {
+            "exam_code": exam_code,
+            "exam_name": exam_name,
+            "year": year,
+            "month": month,
+            "school_page_url": url,
+            "http_status": status,
+            "fetch_method": method,
+            "discovered_via": discovered_via,
+            "drive_file_id": "",
+            "drive_preview_url": "",
+            "drive_view_url": "",
+            "notes": "page_not_found",
+        }
+
+    drive_ids = extract_drive_ids(html) if html else []
+
+    if (force_playwright or not drive_ids) and status == 200:
+        print("  ↻ trying Playwright …")
+        pw_status, pw_html = fetch_html_playwright(url)
+        if pw_html:
+            status = pw_status or status
+            html = pw_html
+            method = "playwright"
+            drive_ids = extract_drive_ids(html)
+
+    if not drive_ids:
+        print(f"  ⚠ no Drive link (status {status}, {len(html)} chars)")
+        return {
+            "exam_code": exam_code,
+            "exam_name": exam_name,
+            "year": year,
+            "month": month,
+            "school_page_url": url,
+            "http_status": status,
+            "fetch_method": method,
+            "discovered_via": discovered_via,
+            "drive_file_id": "",
+            "drive_preview_url": "",
+            "drive_view_url": "",
+            "notes": "no_drive_embed",
+        }
+
+    drive_id = drive_ids[0]
+    preview = f"https://drive.google.com/file/d/{drive_id}/preview"
+    view = f"https://drive.google.com/file/d/{drive_id}/view"
+    extra = f" (+{len(drive_ids) - 1} more)" if len(drive_ids) > 1 else ""
+    print(f"  ✓ Drive ID: {drive_id}{extra}")
+    print(f"    preview: {preview}")
+    return {
+        "exam_code": exam_code,
+        "exam_name": exam_name,
+        "year": year,
+        "month": month,
+        "school_page_url": url,
+        "http_status": status,
+        "fetch_method": method,
+        "discovered_via": discovered_via,
+        "drive_file_id": drive_id,
+        "drive_preview_url": preview,
+        "drive_view_url": view,
+        "notes": "ok",
+    }
+
+
+def collect_constructed(
     start_year: int,
     end_year: int,
     exam_codes: list[str],
@@ -121,85 +286,46 @@ def collect(
             months = EXAM_CYCLES.get(exam_code, ["March", "June", "September", "December"])
             for month in months:
                 url = school_page_url(exam_code, year, month)
-                print(f"\n{exam_code} {month} {year}")
-                print(f"  {url}")
-
-                status, html = fetch_html_requests(url)
-                method = "requests"
-
-                if status == 404:
-                    print("  ⚠ page not found (404)")
-                    rows.append(
-                        {
-                            "exam_code": exam_code,
-                            "exam_name": PROGRAMS_DICT[exam_code]["exam_name"],
-                            "year": year,
-                            "month": month,
-                            "school_page_url": url,
-                            "http_status": status,
-                            "fetch_method": method,
-                            "drive_file_id": "",
-                            "drive_preview_url": "",
-                            "drive_view_url": "",
-                            "notes": "page_not_found",
-                        }
+                rows.append(
+                    resolve_drive_for_page(
+                        exam_code,
+                        PROGRAMS_DICT[exam_code]["exam_name"],
+                        year,
+                        month,
+                        url,
+                        force_playwright,
+                        "constructed",
                     )
-                    time.sleep(PAUSE)
-                    continue
-
-                drive_ids = extract_drive_ids(html) if html else []
-
-                if (force_playwright or not drive_ids) and status == 200:
-                    print("  ↻ trying Playwright …")
-                    pw_status, pw_html = fetch_html_playwright(url)
-                    if pw_html:
-                        status = pw_status or status
-                        html = pw_html
-                        method = "playwright"
-                        drive_ids = extract_drive_ids(html)
-
-                if not drive_ids:
-                    print(f"  ⚠ no Drive link (status {status}, {len(html)} chars)")
-                    rows.append(
-                        {
-                            "exam_code": exam_code,
-                            "exam_name": PROGRAMS_DICT[exam_code]["exam_name"],
-                            "year": year,
-                            "month": month,
-                            "school_page_url": url,
-                            "http_status": status,
-                            "fetch_method": method,
-                            "drive_file_id": "",
-                            "drive_preview_url": "",
-                            "drive_view_url": "",
-                            "notes": "no_drive_embed",
-                        }
-                    )
-                else:
-                    drive_id = drive_ids[0]
-                    preview = f"https://drive.google.com/file/d/{drive_id}/preview"
-                    view = f"https://drive.google.com/file/d/{drive_id}/view"
-                    extra = f" (+{len(drive_ids) - 1} more)" if len(drive_ids) > 1 else ""
-                    print(f"  ✓ Drive ID: {drive_id}{extra}")
-                    print(f"    preview: {preview}")
-                    rows.append(
-                        {
-                            "exam_code": exam_code,
-                            "exam_name": PROGRAMS_DICT[exam_code]["exam_name"],
-                            "year": year,
-                            "month": month,
-                            "school_page_url": url,
-                            "http_status": status,
-                            "fetch_method": method,
-                            "drive_file_id": drive_id,
-                            "drive_preview_url": preview,
-                            "drive_view_url": view,
-                            "notes": "ok",
-                        }
-                    )
-
+                )
                 time.sleep(PAUSE)
 
+    return rows
+
+
+def collect_discovered(
+    start_year: int,
+    end_year: int,
+    exam_codes: list[str],
+    force_playwright: bool,
+) -> list[dict]:
+    print("\nDiscovering pages via WordPress search …")
+    pages = discover_top_school_pages(exam_codes, start_year, end_year)
+    print(f"Found {len(pages)} candidate top-schools pages\n")
+
+    rows: list[dict] = []
+    for page in pages:
+        rows.append(
+            resolve_drive_for_page(
+                page["exam_code"],
+                page["exam_name"],
+                page["year"],
+                page["month"],
+                page["school_page_url"],
+                force_playwright,
+                page["discovered_via"],
+            )
+        )
+        time.sleep(PAUSE)
     return rows
 
 
@@ -218,6 +344,7 @@ def write_outputs(rows: list[dict], out_dir: Path) -> None:
         "school_page_url",
         "http_status",
         "fetch_method",
+        "discovered_via",
         "drive_file_id",
         "drive_preview_url",
         "drive_view_url",
@@ -271,6 +398,12 @@ def main() -> None:
     parser.add_argument("end_year", nargs="?", type=int, default=2026)
     parser.add_argument("exam_code", nargs="?", help="Optional single exam code (e.g. CELE)")
     parser.add_argument("--playwright", action="store_true", help="Always use Playwright (slower, more reliable)")
+    parser.add_argument(
+        "--mode",
+        choices=["discover", "constructed", "both"],
+        default="discover",
+        help="discover=WP search (recommended), constructed=guess URLs, both=merge",
+    )
     parser.add_argument("--out", default="output", help="Output directory (default: output)")
     args = parser.parse_args()
 
@@ -288,7 +421,21 @@ def main() -> None:
 
     print(f"Collecting Drive links for {len(exam_codes)} program(s), {args.start_year}–{args.end_year}")
 
-    rows = collect(args.start_year, args.end_year, exam_codes, args.playwright)
+    rows: list[dict] = []
+    if args.mode in ("constructed", "both"):
+        rows.extend(collect_constructed(args.start_year, args.end_year, exam_codes, args.playwright))
+    if args.mode in ("discover", "both"):
+        rows.extend(collect_discovered(args.start_year, args.end_year, exam_codes, args.playwright))
+
+    # Deduplicate by school page URL, prefer entries with Drive links
+    merged: dict[str, dict] = {}
+    for row in rows:
+        key = row["school_page_url"]
+        existing = merged.get(key)
+        if not existing or (row["drive_file_id"] and not existing["drive_file_id"]):
+            merged[key] = row
+    rows = sorted(merged.values(), key=lambda r: (r["exam_code"], r["year"], r["month"]))
+
     write_outputs(rows, Path(args.out))
 
 
