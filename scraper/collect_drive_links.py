@@ -38,7 +38,12 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.prcboard.com/",
 }
-PAUSE = 1.5
+PAUSE = 1.0
+WP_PAUSE = 0.35
+MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
 
 DRIVE_PATTERNS = [
     re.compile(r"drive\.google\.com/file/d/([A-Za-z0-9_-]+)"),
@@ -62,19 +67,85 @@ def extract_drive_ids(html: str) -> list[str]:
     return ids
 
 
-def wp_search(keyword: str, n: int = 100) -> list[dict]:
+def wp_get(path: str, params: dict | None = None) -> object | None:
     try:
         resp = requests.get(
-            f"{SITE}/wp-json/wp/v2/posts",
-            params={"search": keyword, "per_page": n, "_fields": "id,title,link,date"},
+            f"{SITE}/wp-json/wp/v2/{path}",
+            params=params or {},
             headers=HEADERS,
-            timeout=20,
+            timeout=25,
         )
-        posts = resp.json()
-        return posts if isinstance(posts, list) else []
+        if resp.status_code != 200:
+            return None
+        return resp.json()
     except Exception as exc:
-        print(f"  WP API error: {exc}")
+        print(f"  WP API error ({path}): {exc}")
+        return None
+
+
+def wp_search_all(keyword: str, max_pages: int = 15) -> list[dict]:
+    """Paginated WordPress search — needed to reach older posts."""
+    posts: list[dict] = []
+    seen_ids: set[int] = set()
+
+    for page in range(1, max_pages + 1):
+        data = wp_get(
+            "posts",
+            {
+                "search": keyword,
+                "per_page": 100,
+                "page": page,
+                "_fields": "id,title,link,date",
+            },
+        )
+        if not data or not isinstance(data, list) or not data:
+            break
+        for post in data:
+            pid = post.get("id")
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            posts.append(post)
+        if len(data) < 100:
+            break
+        time.sleep(WP_PAUSE)
+
+    return posts
+
+
+def wp_category_posts(category_slug: str, max_pages: int = 50) -> list[dict]:
+    """Fetch posts from a category archive (e.g. top-performing-schools)."""
+    cats = wp_get("categories", {"slug": category_slug, "per_page": 5})
+    if not cats or not isinstance(cats, list) or not cats:
         return []
+
+    cat_id = cats[0]["id"]
+    posts: list[dict] = []
+    seen_ids: set[int] = set()
+
+    for page in range(1, max_pages + 1):
+        data = wp_get(
+            "posts",
+            {
+                "categories": cat_id,
+                "per_page": 100,
+                "page": page,
+                "_fields": "id,title,link,date",
+            },
+        )
+        if not data or not isinstance(data, list) or not data:
+            break
+        for post in data:
+            pid = post.get("id")
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            posts.append(post)
+        if len(data) < 100:
+            break
+        time.sleep(WP_PAUSE)
+
+    return posts
 
 
 def post_title(post: dict) -> str:
@@ -84,63 +155,262 @@ def post_title(post: dict) -> str:
     return str(title)
 
 
+def parse_year_month(url: str, title: str) -> tuple[int | None, str]:
+    text = f"{title} {url}"
+    year_match = re.search(r"\b(20\d{2})\b", text)
+    if not year_match:
+        return None, ""
+    year = int(year_match.group(1))
+    month_match = re.search(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+        text,
+        re.I,
+    )
+    month = month_match.group(1).title() if month_match else ""
+    return year, month
+
+
+def is_school_performance_page(url: str, title: str) -> bool:
+    """Relaxed filter — includes combined result pages with school performance."""
+    u = url.lower()
+    t = title.lower()
+    markers = (
+        "top-schools",
+        "top schools",
+        "top-performing",
+        "top performing",
+        "performance of schools",
+        "performance-of-schools",
+        "performance-of-school",
+    )
+    if any(m in u or m in t for m in markers):
+        return True
+    # Combined LET / results pages that include top schools section
+    if "topnotchers-and-top-schools" in u or "topnotchers and top schools" in t:
+        return True
+    if re.search(r"top[\s-]?schools", t) and re.search(r"\b20\d{2}\b", f"{t} {u}"):
+        return True
+    return False
+
+
+def infer_exam_code(url: str, title: str, hint: str | None = None) -> str:
+    if hint and hint in PROGRAMS_DICT:
+        return hint
+
+    text = f"{url} {title}".lower()
+    best_code = ""
+    best_score = 0
+
+    for code, prog in PROGRAMS_DICT.items():
+        score = 0
+        slug = prog["prcboard_slug"].lower()
+        if slug in text:
+            score += 10
+        if prog["slug"].replace("-", " ") in text:
+            score += 8
+        for kw in prog["keywords"]:
+            if kw.lower() in text:
+                score += 5
+        if code.lower() in text:
+            score += 6
+        if score > best_score:
+            best_score = score
+            best_code = code
+
+    return best_code or (hint or "UNKNOWN")
+
+
+def add_candidate(
+    candidates: list[dict],
+    seen_urls: set[str],
+    post: dict,
+    start_year: int,
+    end_year: int,
+    discovered_via: str,
+    hint_exam: str | None = None,
+) -> bool:
+    url = post.get("link", "")
+    title = post_title(post)
+    if not url or url in seen_urls:
+        return False
+    if not is_school_performance_page(url, title):
+        return False
+
+    year, month = parse_year_month(url, title)
+    if year is None or year < start_year or year > end_year:
+        return False
+
+    exam_code = infer_exam_code(url, title, hint_exam)
+    exam_name = PROGRAMS_DICT[exam_code]["exam_name"] if exam_code in PROGRAMS_DICT else "Unknown"
+
+    seen_urls.add(url)
+    candidates.append(
+        {
+            "exam_code": exam_code,
+            "exam_name": exam_name,
+            "year": year,
+            "month": month,
+            "school_page_url": url,
+            "discovered_via": discovered_via,
+        }
+    )
+    return True
+
+
 def discover_top_school_pages(
     exam_codes: list[str],
     start_year: int,
     end_year: int,
 ) -> list[dict]:
-    """Find real top-schools URLs via WordPress search (better than URL guessing)."""
+    """Find top-schools / performance-of-schools pages via paginated WP search."""
     candidates: list[dict] = []
     seen_urls: set[str] = set()
+    seen_queries: set[str] = set()
 
+    def run_queries(
+        queries: list[str],
+        via: str,
+        hint: str | None = None,
+        max_pages: int = 15,
+    ) -> int:
+        added = 0
+        for q in queries:
+            if q in seen_queries:
+                continue
+            seen_queries.add(q)
+            posts = wp_search_all(q, max_pages=max_pages)
+            for post in posts:
+                if add_candidate(candidates, seen_urls, post, start_year, end_year, via, hint):
+                    added += 1
+            time.sleep(WP_PAUSE)
+        return added
+
+    # 1) Category archive — best source for historical top-schools posts
+    print("  Scanning category: top-performing-schools …")
+    cat_posts = wp_category_posts("top-performing-schools", max_pages=50)
+    cat_added = sum(
+        1
+        for post in cat_posts
+        if add_candidate(candidates, seen_urls, post, start_year, end_year, "wp_category")
+    )
+    print(f"    +{cat_added} from category ({len(cat_posts)} posts scanned)")
+
+    # 2) Global searches
+    print("  Running global WP searches …")
+    global_queries = [
+        "performance of schools",
+        "top schools performance",
+        "top performing schools",
+        "top-schools results",
+    ]
+    g_added = run_queries(global_queries, "wp_search_global")
+    print(f"    +{g_added} from global queries")
+
+    # 3) Per-exam searches (paginated)
+    print("  Running per-exam WP searches …")
     for exam_code in exam_codes:
         prog = PROGRAMS_DICT[exam_code]
         slug = prog["prcboard_slug"]
-        queries = [
+        kw = prog["keywords"][0] if prog["keywords"] else slug
+        exam_queries = [
             f"top schools {slug}",
             f"TOP SCHOOLS {slug}",
             f"top-schools {slug}",
+            f"performance of schools {slug}",
+            f"{kw} top schools",
+            f"{kw} performance of schools",
         ]
-        posts: list[dict] = []
-        for q in queries:
-            posts.extend(wp_search(q, n=100))
-            time.sleep(0.5)
+        added = run_queries(exam_queries, "wp_search_exam", exam_code)
+        print(f"    {exam_code}: +{added} (total unique: {len(candidates)})")
 
-        for post in posts:
-            url = post.get("link", "")
-            title = post_title(post)
-            if not url or url in seen_urls:
-                continue
-            if "top-schools" not in url.lower() and "top schools" not in title.lower():
-                continue
+    # 4) Per-exam per-year searches — critical for older years (WP search ranks recent posts first)
+    historical_end = min(end_year, 2020)
+    year_added = 0
+    if start_year <= historical_end:
+        print(f"  Running per-year searches ({start_year}–{historical_end}) …")
+        for exam_code in exam_codes:
+            prog = PROGRAMS_DICT[exam_code]
+            slug = prog["prcboard_slug"]
+            for year in range(start_year, historical_end + 1):
+                year_queries = [
+                    f"top schools {slug} {year}",
+                    f"TOP SCHOOLS {year} {slug}",
+                    f"performance of schools {year} {slug}",
+                    f"top-schools {year} {slug}",
+                    f"{slug} {year} performance of schools",
+                ]
+                for q in year_queries:
+                    if q in seen_queries:
+                        continue
+                    seen_queries.add(q)
+                    posts = wp_search_all(q, max_pages=8)
+                    for post in posts:
+                        if add_candidate(
+                            candidates, seen_urls, post, start_year, end_year, "wp_search_year", exam_code
+                        ):
+                            year_added += 1
+                    time.sleep(WP_PAUSE)
+        print(f"    +{year_added} from legacy per-year queries (total unique: {len(candidates)})")
 
-            year_match = re.search(r"\b(20\d{2})\b", f"{title} {url}")
-            if not year_match:
-                continue
-            year = int(year_match.group(1))
-            if year < start_year or year > end_year:
-                continue
+    recent_start = max(start_year, 2021)
+    recent_added = 0
+    if recent_start <= end_year:
+        print(f"  Running recent per-year searches ({recent_start}–{end_year}) …")
+        for exam_code in exam_codes:
+            prog = PROGRAMS_DICT[exam_code]
+            slug = prog["prcboard_slug"]
+            for year in range(recent_start, end_year + 1):
+                year_queries = [
+                    f"top schools {slug} {year}",
+                    f"performance of schools {year} {slug}",
+                ]
+                for q in year_queries:
+                    if q in seen_queries:
+                        continue
+                    seen_queries.add(q)
+                    posts = wp_search_all(q, max_pages=3)
+                    for post in posts:
+                        if add_candidate(
+                            candidates, seen_urls, post, start_year, end_year, "wp_search_year", exam_code
+                        ):
+                            recent_added += 1
+                    time.sleep(WP_PAUSE)
+        print(f"    +{recent_added} from recent per-year queries (total unique: {len(candidates)})")
 
-            month_match = re.search(
-                r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b",
-                title,
-                re.I,
-            )
-            month = month_match.group(1).title() if month_match else ""
+    # 5) Lightweight constructed URL probe — only HEAD/GET for 200s, no Drive fetch yet
+    print("  Probing constructed top-schools URLs for missing years …")
+    constructed_added = 0
+    for year in range(start_year, end_year + 1):
+        for exam_code in exam_codes:
+            months = EXAM_CYCLES.get(exam_code, list(MONTHS))
+            for month in months:
+                url = school_page_url(exam_code, year, month)
+                if url in seen_urls:
+                    continue
+                try:
+                    resp = requests.head(url, headers=HEADERS, timeout=15, allow_redirects=True)
+                    if resp.status_code == 405:
+                        resp = requests.get(url, headers=HEADERS, timeout=15, stream=True)
+                        resp.close()
+                    status = resp.status_code
+                except requests.RequestException:
+                    status = 0
+                if status != 200:
+                    continue
+                post = {"link": url, "title": {"rendered": f"TOP SCHOOLS {month} {year} {exam_code}"}}
+                if add_candidate(
+                    candidates, seen_urls, post, start_year, end_year, "constructed_probe", exam_code
+                ):
+                    constructed_added += 1
+                time.sleep(0.15)
+    print(f"    +{constructed_added} from constructed URL probes")
 
-            seen_urls.add(url)
-            candidates.append(
-                {
-                    "exam_code": exam_code,
-                    "exam_name": prog["exam_name"],
-                    "year": year,
-                    "month": month,
-                    "school_page_url": url,
-                    "discovered_via": "wp_search",
-                }
-            )
-
-        print(f"  {exam_code}: {sum(1 for c in candidates if c['exam_code'] == exam_code)} pages via WP search")
+    by_year: dict[int, int] = {}
+    for c in candidates:
+        by_year[c["year"]] = by_year.get(c["year"], 0) + 1
+    print(f"\n  Discovery summary: {len(candidates)} unique pages")
+    for y in sorted(by_year):
+        print(f"    {y}: {by_year[y]} pages")
 
     return candidates
 
@@ -360,11 +630,22 @@ def write_outputs(rows: list[dict], out_dir: Path) -> None:
         json.dump(rows, f, indent=2, ensure_ascii=False)
 
     found = [r for r in rows if r["drive_file_id"]]
+    by_year: dict[int, int] = {}
+    for r in found:
+        by_year[r["year"]] = by_year.get(r["year"], 0) + 1
+
     lines = [
         "# Performance of Schools — Google Drive links",
         "",
         f"Total pages checked: **{len(rows)}**",
         f"Drive links found: **{len(found)}**",
+        "",
+        "## By year",
+        "",
+    ]
+    for y in sorted(by_year):
+        lines.append(f"- **{y}**: {by_year[y]} links")
+    lines.extend([
         "",
         "## How to download",
         "",
@@ -375,7 +656,7 @@ def write_outputs(rows: list[dict], out_dir: Path) -> None:
         "",
         "## Links",
         "",
-    ]
+    ])
     for r in found:
         lines.append(
             f"- **{r['exam_code']} {r['month']} {r['year']}** — "
