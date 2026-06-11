@@ -1,113 +1,172 @@
-import { Card, SectionTitle, NotConnected, ConsistencyBadge, SchoolLink, PassRate } from "@/components/ui";
+import Link from "next/link";
+import { Card, SectionTitle, NotConnected, SchoolLink, PassRate } from "@/components/ui";
+import { SearchBar } from "@/components/SearchBar";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
-import { topByConsistency, examPopularity } from "@/lib/queries";
-import type { ConsistencyLabel } from "@/lib/types";
+import { leaderboardByProgram, examPopularity } from "@/lib/queries";
+import { PROGRAMS, getProgramByCode } from "@/lib/programs";
 
 export const metadata = { title: "Leaderboard" };
 export const dynamic = "force-dynamic";
 
-export default async function LeaderboardPage() {
+export default async function LeaderboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ exam_code?: string }>;
+}) {
+  const sp = await searchParams;
+  const examCode = sp.exam_code?.trim() || "";
+  const program = examCode ? getProgramByCode(examCode) : undefined;
+
   if (!isSupabaseConfigured()) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-extrabold text-white">Top schools leaderboard</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Leaderboard</h1>
         <NotConnected />
       </div>
     );
   }
 
-  let leaders: any[] = [];
-  let popularity: any[] = [];
+  let boards: Awaited<ReturnType<typeof leaderboardByProgram>> = [];
+  let popularity: Awaited<ReturnType<typeof examPopularity>> = [];
   try {
-    [leaders, popularity] = await Promise.all([topByConsistency(25), examPopularity()]);
+    [boards, popularity] = await Promise.all([leaderboardByProgram(15), examPopularity()]);
   } catch {
     return <NotConnected />;
   }
 
-  const isProvisional = leaders.length > 0 && leaders[0].score === null;
+  const board = examCode ? boards.find((b) => b.exam_code === examCode) : undefined;
+  const programLabel =
+    program?.name.replace(" Licensure Examination", "") ?? examCode;
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-extrabold text-white">Top schools leaderboard</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Schools ranked by long-term consistency across all board exam programs.
+        <h1 className="text-2xl font-extrabold text-slate-900">Leaderboard</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Top schools by pass rate (passers ÷ examinees). Schools need at least 10
+          examinees to qualify.
         </p>
       </div>
 
-      <section>
-        <SectionTitle>
-          {isProvisional ? "Top schools by average pass rate (provisional)" : "Most consistent schools"}
-        </SectionTitle>
+      <Card>
+        <form method="get" className="flex flex-wrap items-end gap-3">
+          <label className="min-w-[16rem] flex-1 text-xs text-slate-600">
+            Examination
+            <select
+              name="exam_code"
+              required
+              defaultValue={examCode}
+              className="field-input mt-1 w-full"
+            >
+              <option value="" disabled>
+                Select an examination…
+              </option>
+              {PROGRAMS.map((p) => (
+                <option key={p.examCode} value={p.examCode}>
+                  {p.examCode} — {p.name.replace(" Licensure Examination", "")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+          >
+            Show leaderboard
+          </button>
+        </form>
+      </Card>
 
-        {isProvisional && (
-          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-            Consistency Scores are still being computed from historical data. Showing average pass rate ranking in the meantime — full scores will appear once multi-year data is processed.
+      {!examCode ? (
+        <Card>
+          <p className="text-sm text-slate-700">
+            Choose an examination above to view the top-performing schools.
+          </p>
+        </Card>
+      ) : !program ? (
+        <Card>
+          <p className="text-sm text-slate-700">Unknown examination code.</p>
+        </Card>
+      ) : !board || board.leaders.length === 0 ? (
+        <Card>
+          <p className="text-sm text-slate-700">
+            No leaderboard data for {programLabel} yet.
+          </p>
+        </Card>
+      ) : (
+        <section>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">{board.exam_name}</h2>
+              <p className="text-xs text-slate-600">
+                Highest weighted pass rate across all ingested exam cycles
+              </p>
+            </div>
+            <Link
+              href={`/rankings?exam_code=${board.exam_code}`}
+              className="no-underline-link text-xs text-brand hover:text-brand-dark"
+            >
+              View all {board.exam_code} schools →
+            </Link>
           </div>
-        )}
 
-        {leaders.length === 0 ? (
-          <Card>
-            <p className="text-slate-400">
-              No school performance data available yet.
-            </p>
-            <p className="mt-2 text-sm text-slate-500">
-              Data will appear here once the scraper has collected at least 2 years of results for each board exam.
-              The scraper runs automatically every Sunday, or can be triggered manually via GitHub Actions.
-            </p>
-          </Card>
-        ) : (
           <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b border-ink-line text-left text-slate-400">
+            <table className="data-table w-full text-sm">
+              <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
                 <tr>
                   <th className="p-3">#</th>
                   <th className="p-3">School</th>
-                  <th className="p-3">Exam</th>
-                  <th className="p-3 text-right">Avg Rate</th>
-                  <th className="p-3 text-right">Years</th>
-                  {!isProvisional && <th className="p-3 text-right">Score</th>}
-                  {!isProvisional && <th className="p-3">Rating</th>}
+                  <th className="p-3 text-right">Pass Rate</th>
+                  <th className="p-3 text-right">Passers</th>
+                  <th className="p-3 text-right">Examinees</th>
+                  <th className="p-3 text-right">Cycles</th>
                 </tr>
               </thead>
               <tbody>
-                {leaders.map((l, i) => (
-                  <tr key={`${l.school_id}-${l.exam_code}`} className="border-b border-ink-line/50 hover:bg-white/5">
-                    <td className="p-3 text-slate-500">{i + 1}</td>
+                {board.leaders.map((l, i) => (
+                  <tr
+                    key={`${l.school_id}-${board.exam_code}`}
+                    className="border-b border-ink-line/80"
+                  >
+                    <td className="p-3 text-slate-600">{i + 1}</td>
                     <td className="p-3">
                       <SchoolLink id={l.school_id} name={l.school} />
                     </td>
-                    <td className="p-3 font-mono text-xs text-slate-400">{l.exam_code}</td>
-                    <td className="p-3 text-right">
-                      <PassRate value={l.avg_rate} />
+                    <td className="p-3 text-right font-semibold">
+                      <PassRate value={l.pass_rate} />
                     </td>
-                    <td className="p-3 text-right text-slate-300">{l.years}</td>
-                    {!isProvisional && (
-                      <td className="p-3 text-right font-semibold text-white">{l.score}</td>
-                    )}
-                    {!isProvisional && (
-                      <td className="p-3">
-                        <ConsistencyBadge label={l.label as ConsistencyLabel} />
-                      </td>
-                    )}
+                    <td className="p-3 text-right text-slate-800">
+                      {l.total_passers.toLocaleString()}
+                    </td>
+                    <td className="p-3 text-right text-slate-800">
+                      {l.total_takers.toLocaleString()}
+                    </td>
+                    <td className="p-3 text-right text-slate-700">{l.cycles}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </Card>
-        )}
-      </section>
+        </section>
+      )}
+
+      <div className="max-w-xl">
+        <SearchBar />
+        <p className="mt-1 text-xs text-slate-600">
+          Looking for a specific school? Try &quot;valenzuela&quot;, &quot;pamantasan&quot;, or &quot;PLV&quot;.
+        </p>
+      </div>
 
       <section>
         <SectionTitle>Examination popularity (all-time examinees)</SectionTitle>
         {popularity.length === 0 ? (
           <Card>
-            <p className="text-slate-400">No exam data yet.</p>
+            <p className="text-slate-700">No exam data yet.</p>
           </Card>
         ) : (
           <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b border-ink-line text-left text-slate-400">
+            <table className="data-table w-full text-sm">
+              <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
                 <tr>
                   <th className="p-3">Examination</th>
                   <th className="p-3 text-right">All-time Examinees</th>
@@ -116,10 +175,12 @@ export default async function LeaderboardPage() {
               </thead>
               <tbody>
                 {popularity.map((p) => (
-                  <tr key={p.exam_code} className="border-b border-ink-line/50 hover:bg-white/5">
-                    <td className="p-3 text-white">{p.exam_fullname}</td>
-                    <td className="p-3 text-right">{p.all_time_takers?.toLocaleString() ?? "—"}</td>
-                    <td className="p-3 text-right">{p.cycles}</td>
+                  <tr key={p.exam_code} className="border-b border-ink-line/80">
+                    <td className="p-3 font-medium text-slate-900">{p.exam_fullname}</td>
+                    <td className="p-3 text-right text-slate-800">
+                      {p.all_time_takers?.toLocaleString() ?? "—"}
+                    </td>
+                    <td className="p-3 text-right text-slate-800">{p.cycles}</td>
                   </tr>
                 ))}
               </tbody>

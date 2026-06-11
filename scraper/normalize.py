@@ -15,6 +15,7 @@ ABBREV = {
     r"\bADMU\b": "Ateneo de Manila University",
     r"\bDLSU\b": "De La Salle University",
     r"\bPLM\b": "Pamantasan ng Lungsod ng Maynila",
+    r"\bPLV\b": "Pamantasan ng Lungsod ng Valenzuela",
     r"\bMSU\b": "Mindanao State University",
     r"\bUSC\b": "University of San Carlos",
 }

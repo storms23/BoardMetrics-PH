@@ -12,7 +12,7 @@ EXAM_CYCLES = {
     "CLE": ["June", "November"],
     "CELE": ["March", "November"],
     "ECE": ["April", "October"],
-    "ELE": ["April", "October"],
+    "REE": ["April", "October"],
     "MELE": ["April", "October"],
     "PLE": ["June", "December"],
     "MTLE": ["March", "September"],
@@ -77,3 +77,14 @@ EXAM_NAMES = {p[0]: p[1] for p in PROGRAMS}
 KEYWORDS = {p[0]: p[4] for p in PROGRAMS}
 PRCBOARD_SLUGS = {p[0]: p[5] for p in PROGRAMS}
 ALL_CODES = [p[0] for p in PROGRAMS]
+
+
+def resolve_exam_code(code: str) -> str | None:
+    """Case-insensitive lookup (AgriLE, PhLE, LET-E, etc.)."""
+    if code in PROGRAMS_DICT:
+        return code
+    key = code.upper()
+    for exam_code in ALL_CODES:
+        if exam_code.upper() == key:
+            return exam_code
+    return None

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card, SectionTitle, NotConnected, PassRate, SchoolLink } from "@/components/ui";
+import { SearchBar } from "@/components/SearchBar";
 import { ExportButton } from "@/components/ExportButton";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { getRankings, getAggregateRankings } from "@/lib/queries";
@@ -7,12 +8,6 @@ import { PROGRAMS } from "@/lib/programs";
 
 export const metadata = { title: "Rankings" };
 export const dynamic = "force-dynamic";
-
-const REGIONS = [
-  "NCR", "CAR", "Region I", "Region II", "Region III", "Region IV-A",
-  "Region IV-B", "Region V", "Region VI", "Region VII", "Region VIII",
-  "Region IX", "Region X", "Region XI", "Region XII", "Region XIII", "BARMM",
-];
 
 export default async function RankingsPage({
   searchParams,
@@ -22,7 +17,8 @@ export default async function RankingsPage({
   const sp = await searchParams;
   const examCode = sp.exam_code || PROGRAMS[3].examCode;
   const year = sp.year ? Number(sp.year) : undefined;
-  const region = sp.region || undefined;
+  const month = sp.month?.trim() || undefined;
+  const school = sp.school?.trim() || undefined;
   const minTakers = sp.min_takers ? Number(sp.min_takers) : undefined;
 
   // If no year is selected → multi-year aggregate rankings
@@ -34,9 +30,9 @@ export default async function RankingsPage({
   if (connected) {
     try {
       if (isAggregate) {
-        rankings = await getAggregateRankings({ examCode, region, minTakers, limit: 100 });
+        rankings = await getAggregateRankings({ examCode, school, minTakers, limit: 1000 });
       } else {
-        rankings = await getRankings({ examCode, year, region, minTakers, limit: 100 });
+        rankings = await getRankings({ examCode, year, month, school, minTakers, limit: 1000 });
       }
     } catch {
       connected = false;
@@ -47,8 +43,9 @@ export default async function RankingsPage({
     type: "rankings",
     exam_code: examCode,
     ...(year ? { year: String(year) } : {}),
-    ...(region ? { region } : {}),
+    ...(month ? { month } : {}),
     ...(minTakers ? { min_takers: String(minTakers) } : {}),
+    ...(school ? { school } : {}),
   });
 
   const programName =
@@ -58,25 +55,34 @@ export default async function RankingsPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-white">Rankings</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-2xl font-extrabold text-slate-900">Rankings</h1>
+          <p className="mt-1 text-sm text-slate-600">
             {isAggregate
-              ? `${programName} — all-time average pass rate across all available years`
-              : `${programName} — single-year results for ${year}`}
+              ? `${programName} — all-time pass rate (one row per school, all years combined)`
+              : month
+                ? `${programName} — ${month} ${year}`
+                : `${programName} — all cycles in ${year} (pick a month for one exam sitting)`}
           </p>
         </div>
         {connected && rankings.length > 0 && <ExportButton query={exportQuery.toString()} />}
       </div>
 
+      <div className="max-w-xl">
+        <SearchBar />
+        <p className="mt-1 text-xs text-slate-500">
+          Global school search — or filter this table with the school field below.
+        </p>
+      </div>
+
       {/* Filters */}
       <Card>
         <form method="get" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="text-xs text-slate-400">
+          <label className="text-xs text-slate-500">
             Examination
             <select
               name="exam_code"
               defaultValue={examCode}
-              className="mt-1 w-full rounded-lg border border-ink-line bg-ink px-3 py-2 text-white"
+              className="field-input mt-1 w-full"
             >
               {PROGRAMS.map((p) => (
                 <option key={p.examCode} value={p.examCode}>
@@ -85,40 +91,49 @@ export default async function RankingsPage({
               ))}
             </select>
           </label>
-          <label className="text-xs text-slate-400">
+          <label className="text-xs text-slate-500">
             Year{" "}
-            <span className="text-slate-500">(leave blank for all-time average)</span>
+            <span className="text-slate-400">(blank = all-time)</span>
             <input
               name="year"
               type="number"
               defaultValue={year ?? ""}
-              placeholder="e.g. 2024"
-              className="mt-1 w-full rounded-lg border border-ink-line bg-ink px-3 py-2 text-white"
+              placeholder="e.g. 2017"
+              className="field-input mt-1 w-full"
             />
           </label>
-          <label className="text-xs text-slate-400">
-            Region
+          <label className="text-xs text-slate-500">
+            Month{" "}
+            <span className="text-slate-400">(one exam cycle)</span>
             <select
-              name="region"
-              defaultValue={region ?? ""}
-              className="mt-1 w-full rounded-lg border border-ink-line bg-ink px-3 py-2 text-white"
+              name="month"
+              defaultValue={month ?? ""}
+              className="field-input mt-1 w-full"
             >
-              <option value="">All regions</option>
-              {REGIONS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
+              <option value="">All cycles in year</option>
+              {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m) => (
+                <option key={m} value={m}>{m}</option>
               ))}
             </select>
           </label>
-          <label className="text-xs text-slate-400">
+          <label className="text-xs text-slate-500">
+            School name
+            <input
+              name="school"
+              type="search"
+              defaultValue={school ?? ""}
+              placeholder="e.g. valenzuela, PLV"
+              className="field-input mt-1 w-full"
+            />
+          </label>
+          <label className="text-xs text-slate-500">
             Min examinees
             <input
               name="min_takers"
               type="number"
               defaultValue={minTakers ?? ""}
               placeholder="e.g. 50"
-              className="mt-1 w-full rounded-lg border border-ink-line bg-ink px-3 py-2 text-white"
+              className="field-input mt-1 w-full"
             />
           </label>
           <div className="flex items-end">
@@ -136,7 +151,7 @@ export default async function RankingsPage({
         <NotConnected />
       ) : rankings.length === 0 ? (
         <Card>
-          <p className="text-slate-400">No data found for the selected filters.</p>
+          <p className="text-slate-600">No data found for the selected filters.</p>
           {year && (
             <p className="mt-2 text-sm text-slate-500">
               Try removing the year filter to see the all-time aggregate ranking.
@@ -147,14 +162,13 @@ export default async function RankingsPage({
         /* ── Multi-year aggregate table ── */
         <Card className="overflow-x-auto p-0">
           <div className="border-b border-ink-line px-4 py-2 text-xs text-slate-500">
-            Ranked by average pass rate · Schools with at least 1 exam cycle shown
+            {rankings.length} schools · ranked by pass rate (passers ÷ examinees) across all years
           </div>
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-line text-left text-slate-400">
+          <table className="data-table w-full text-sm">
+            <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
               <tr>
                 <th className="p-3">#</th>
                 <th className="p-3">School</th>
-                <th className="p-3">Region</th>
                 <th className="p-3 text-right">Avg Pass Rate</th>
                 <th className="p-3 text-right">Best</th>
                 <th className="p-3 text-right">Worst</th>
@@ -164,19 +178,18 @@ export default async function RankingsPage({
             </thead>
             <tbody>
               {rankings.map((r) => (
-                <tr key={r.school_id} className="border-b border-ink-line/50 hover:bg-white/5">
-                  <td className="p-3 font-semibold text-slate-400">{r.rank}</td>
+                <tr key={r.school_id} className="border-b border-ink-line/80">
+                  <td className="p-3 font-semibold text-slate-500">{r.rank}</td>
                   <td className="p-3">
                     <SchoolLink id={r.school_id} name={r.school} />
                   </td>
-                  <td className="p-3 text-slate-400">{r.region ?? "—"}</td>
                   <td className="p-3 text-right font-semibold">
                     <PassRate value={r.avg_pass_rate} />
                   </td>
-                  <td className="p-3 text-right text-emerald-400">{r.best_pass_rate}%</td>
-                  <td className="p-3 text-right text-rose-400">{r.worst_pass_rate}%</td>
-                  <td className="p-3 text-right text-slate-300">{r.years_participated}</td>
-                  <td className="p-3 text-right text-slate-400">
+                  <td className="p-3 text-right text-emerald-600">{r.best_pass_rate}%</td>
+                  <td className="p-3 text-right text-rose-600">{r.worst_pass_rate}%</td>
+                  <td className="p-3 text-right text-slate-700">{r.years_participated}</td>
+                  <td className="p-3 text-right text-slate-600">
                     {r.total_takers?.toLocaleString() ?? "—"}
                   </td>
                 </tr>
@@ -188,14 +201,15 @@ export default async function RankingsPage({
         /* ── Single-year table ── */
         <Card className="overflow-x-auto p-0">
           <div className="border-b border-ink-line px-4 py-2 text-xs text-slate-500">
-            Showing results for {year} · Rank is from PRC official results
+            {rankings.length} schools
+            {month ? ` · ${month} ${year}` : ` · all cycles in ${year}`}
+            {" "}· full PRC Performance of Schools table
           </div>
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-line text-left text-slate-400">
+          <table className="data-table w-full text-sm">
+            <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
               <tr>
                 <th className="p-3">PRC Rank</th>
                 <th className="p-3">School</th>
-                <th className="p-3">Region</th>
                 <th className="p-3 text-right">Examinees</th>
                 <th className="p-3 text-right">Passers</th>
                 <th className="p-3 text-right">Pass Rate</th>
@@ -206,19 +220,18 @@ export default async function RankingsPage({
               {rankings.map((r) => (
                 <tr
                   key={`${r.school_id}-${r.year}-${r.month}`}
-                  className="border-b border-ink-line/50 hover:bg-white/5"
+                  className="border-b border-ink-line/80"
                 >
                   <td className="p-3 text-slate-500">{r.rank ?? "—"}</td>
                   <td className="p-3">
                     <SchoolLink id={r.school_id} name={r.school} />
                   </td>
-                  <td className="p-3 text-slate-400">{r.region ?? "—"}</td>
                   <td className="p-3 text-right">{r.takers?.toLocaleString() ?? "—"}</td>
                   <td className="p-3 text-right">{r.passers?.toLocaleString() ?? "—"}</td>
                   <td className="p-3 text-right">
                     <PassRate value={r.pass_rate} />
                   </td>
-                  <td className="p-3 text-right text-slate-400">
+                  <td className="p-3 text-right text-slate-600">
                     {r.national_rate != null ? `${r.national_rate}%` : "—"}
                   </td>
                 </tr>

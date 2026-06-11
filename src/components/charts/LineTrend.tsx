@@ -24,38 +24,52 @@ export function LineTrend({
   data: TrendPoint[];
   showNational?: boolean;
 }) {
+  const hasSchool = data.some((d) => d.school != null);
+  const hasNational = showNational && data.some((d) => d.national != null);
+
   return (
     <ResponsiveContainer width="100%" height={280}>
       <LineChart data={data} margin={{ top: 10, right: 20, bottom: 0, left: -10 }}>
-        <CartesianGrid stroke="#1A1A2E" strokeDasharray="3 3" />
-        <XAxis dataKey="label" stroke="#6A6A8A" fontSize={12} />
-        <YAxis stroke="#6A6A8A" fontSize={12} domain={[0, 100]} unit="%" />
+        <CartesianGrid stroke="#cbd5e1" strokeDasharray="3 3" />
+        <XAxis dataKey="label" stroke="#475569" fontSize={12} tick={{ fill: "#475569" }} />
+        <YAxis
+          stroke="#475569"
+          fontSize={12}
+          tick={{ fill: "#475569" }}
+          domain={[0, 100]}
+          unit="%"
+        />
         <Tooltip
           contentStyle={{
-            background: "#0D0D1E",
-            border: "1px solid #1A1A2E",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
             borderRadius: 8,
-            color: "#E2E8F0",
+            color: "#0f172a",
           }}
         />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Line
-          type="monotone"
-          dataKey="school"
-          name="School"
-          stroke="#A78BFA"
-          strokeWidth={2}
-          dot={{ r: 3 }}
-        />
-        {showNational && (
+        {(hasSchool || hasNational) && (
+          <Legend wrapperStyle={{ fontSize: 12, color: "#334155" }} />
+        )}
+        {hasSchool && (
+          <Line
+            type="monotone"
+            dataKey="school"
+            name="School"
+            stroke="#1d4ed8"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+            connectNulls
+          />
+        )}
+        {hasNational && (
           <Line
             type="monotone"
             dataKey="national"
             name="National"
-            stroke="#60A5FA"
+            stroke="#0369a1"
             strokeWidth={2}
-            strokeDasharray="5 5"
-            dot={false}
+            dot={{ r: 3 }}
+            connectNulls
           />
         )}
       </LineChart>

@@ -11,7 +11,7 @@ export default async function AdminPage() {
   if (!process.env.ADMIN_PASSWORD) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-extrabold text-white">Admin console</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
         <EmptyState
           title="Admin is not configured."
           hint="Set ADMIN_PASSWORD in .env.local to enable the admin console."
@@ -23,14 +23,14 @@ export default async function AdminPage() {
   if (!(await isAdmin())) {
     return (
       <div className="mx-auto max-w-sm space-y-4">
-        <h1 className="text-2xl font-extrabold text-white">Admin login</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Admin login</h1>
         <Card>
           <form action={login} className="space-y-3">
             <input
               type="password"
               name="password"
               placeholder="Admin password"
-              className="w-full rounded-lg border border-ink-line bg-ink px-3 py-2 text-white"
+              className="field-input w-full"
               autoFocus
             />
             <button
@@ -48,7 +48,7 @@ export default async function AdminPage() {
   if (!isSupabaseConfigured()) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-extrabold text-white">Admin console</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
         <EmptyState title="Connect Supabase to view import jobs, audit logs, and verification." />
       </div>
     );
@@ -66,7 +66,7 @@ export default async function AdminPage() {
   } catch (e) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-extrabold text-white">Admin console</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
         <EmptyState title="Could not load admin data." hint={(e as Error).message} />
       </div>
     );
@@ -79,9 +79,9 @@ export default async function AdminPage() {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-extrabold text-white">Admin console</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
         <form action={logout}>
-          <button className="rounded-lg border border-ink-line px-3 py-1.5 text-sm text-slate-300 hover:border-brand">
+          <button className="rounded-lg border border-ink-line px-3 py-1.5 text-sm text-slate-600 hover:border-brand">
             Sign out
           </button>
         </form>
@@ -89,10 +89,10 @@ export default async function AdminPage() {
 
       <section>
         <SectionTitle>Data import</SectionTitle>
-        <Card className="text-sm text-slate-300">
+        <Card className="text-sm text-slate-700">
           Imports run via the Python ETL pipeline (see <code>scraper/</code>). Trigger a run with{" "}
-          <code className="text-brand-light">python scraper.py --all 2025</code>, then recompute
-          scores with <code className="text-brand-light">python consistency.py</code>. Each run is
+          <code className="text-brand">python scraper.py --all 2025</code>, then recompute
+          scores with <code className="text-brand">python consistency.py</code>. Each run is
           recorded below.
         </Card>
       </section>
@@ -103,7 +103,7 @@ export default async function AdminPage() {
           {allChecks.map((c) => (
             <Card key={c.type}>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-300">{c.type}</span>
+                <span className="text-sm text-slate-700">{c.type}</span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                     c.count === 0

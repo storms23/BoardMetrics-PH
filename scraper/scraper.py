@@ -10,6 +10,11 @@ Usage:
   python scraper.py                 # run the default target list
   python scraper.py NLE 2025        # scrape one program + year
   python scraper.py --all 2025      # scrape all 16 programs for a year
+  python scraper.py --national --all 2015 2026   # national pass rates (index + ingest)
+  python scraper.py --national --index 2015 2026 # build URL index only
+  python scraper.py --national --ingest          # ingest from output/national_links.json
+  python scraper.py --national --fill-gaps 2015 2026  # ingest missing cycles only
+  python scraper.py --national NLE 2025         # national stats for one program/year
 """
 
 import os
@@ -27,7 +32,7 @@ from programs import EXAM_NAMES, KEYWORDS, PRCBOARD_SLUGS, ALL_CODES, PROGRAMS_D
 from normalize import infer_region
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-KEY = os.getenv("ANTHROPIC_API_KEY", "")
+KEY = os.getenv("DEEPSEEK_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
 OCR_SPACE_KEY = os.getenv("OCR_SPACE_API_KEY", "K87217505288957")  # Default to provided key
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -72,48 +77,8 @@ def wp_get_content(post_id: int) -> str:
         return ""
 
 
-# ── EXTRACT: national summary ─────────────────────────────────────────────────
-def get_summary(text: str) -> dict | None:
-    """
-    Extract national exam statistics from text.
-    Handles two formats:
-    - prcboard.com: "6,438 out of 18,370 (35.05%)" 
-    - legacy: "6,438 out of 18,370 passed"
-    """
-    # Try prcboard.com format first (with percentage in parentheses)
-    m = re.search(r"([\d,]+)\s+out\s+of\s+([\d,]+)\s+\(([\d.]+)%?\)", text, re.IGNORECASE)
-    if m:
-        passers = int(m.group(1).replace(",", ""))
-        takers = int(m.group(2).replace(",", ""))
-        pass_rate = float(m.group(3))
-        return {
-            "total_passers": passers,
-            "total_takers": takers,
-            "pass_rate": pass_rate,
-        }
-    
-    # Fallback to legacy format
-    m = re.search(r"([\d,]+)\s+out\s+of\s+([\d,]+)\s+passed", text, re.IGNORECASE)
-    if not m:
-        return None
-    passers = int(m.group(1).replace(",", ""))
-    takers = int(m.group(2).replace(",", ""))
-    return {
-        "total_passers": passers,
-        "total_takers": takers,
-        "pass_rate": round(passers / takers * 100, 2) if takers else 0,
-    }
-
-
-def get_date(title: str, text: str = "") -> dict:
-    months = (r"(January|February|March|April|May|June|July|August|"
-              r"September|October|November|December)")
-    for src in [title, text]:
-        m = re.search(rf"{months}\s+(20\d\d)", src, re.IGNORECASE)
-        if m:
-            return {"month": m.group(1).capitalize(), "year": int(m.group(2))}
-    m = re.search(r"\b(20\d\d)\b", title)
-    return {"month": None, "year": int(m.group(1)) if m else None}
+# ── EXTRACT: national summary (shared with national_ingest) ───────────────────
+from national_extract import get_date, get_summary  # noqa: E402
 
 
 # ── EXTRACT: Google Drive PDF ─────────────────────────────────────────────────
@@ -174,7 +139,7 @@ def download_drive_pdf(file_id: str) -> bytes | None:
 def parse_pdf_table(pdf_bytes: bytes) -> list:
     """
     Extract school performance table from PDF using pdfplumber.
-    Falls back to Claude OCR if pdfplumber returns empty (scanned PDF).
+    Falls back to DeepSeek OCR if pdfplumber returns empty (scanned PDF).
     
     Handles both Format A (4-col) and Format B (14-col PRC standard).
     """
@@ -183,7 +148,7 @@ def parse_pdf_table(pdf_bytes: bytes) -> list:
         import pdfplumber
     except ImportError:
         print("  pdfplumber not installed; falling back to OCR")
-        return ocr_pdf_claude(pdf_bytes)
+        return ocr_pdf_llm(pdf_bytes)
     
     results = []
     try:
@@ -255,60 +220,28 @@ def parse_pdf_table(pdf_bytes: bytes) -> list:
     
     # If pdfplumber found nothing, try Claude OCR (scanned PDF)
     if not results:
-        print("  pdfplumber returned 0 rows; trying Claude OCR...")
-        return ocr_pdf_claude(pdf_bytes)
+        print("  pdfplumber returned 0 rows; trying DeepSeek OCR...")
+        return ocr_pdf_llm(pdf_bytes)
     
     return results
 
 
+def ocr_pdf_llm(pdf_bytes: bytes) -> list:
+    """Use DeepSeek to OCR a scanned PDF."""
+    from ocr_llm import ocr_school_table_from_pdf
+
+    data = ocr_school_table_from_pdf(pdf_bytes)
+    if not data:
+        return []
+    for item in data:
+        if "region" not in item:
+            item["region"] = infer_region(item.get("school", ""))
+    return data
+
+
 def ocr_pdf_claude(pdf_bytes: bytes) -> list:
-    """Use Claude to OCR a scanned PDF."""
-    if not KEY:
-        print("  No ANTHROPIC_API_KEY; skipping PDF OCR.")
-        return []
-    try:
-        import anthropic
-        b64 = base64.standard_b64encode(pdf_bytes).decode()
-        cl = anthropic.Anthropic(api_key=KEY)
-        msg = cl.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=8192,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": b64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Extract every row from the school performance table. "
-                            "Return ONLY valid JSON, no markdown, no explanation:\n"
-                            '[{"rank":1,"school":"School Name","takers":100,'
-                            '"passers":80,"pass_rate":80.0}]'
-                        ),
-                    },
-                ],
-            }],
-        )
-        txt = re.sub(r"```json|```", "", msg.content[0].text.strip()).strip()
-        data = json.loads(txt)
-        # Add region inference
-        for item in data:
-            if "region" not in item:
-                item["region"] = infer_region(item.get("school", ""))
-        return data
-    except json.JSONDecodeError:
-        print("  PDF OCR returned non-JSON.")
-        return []
-    except Exception as e:
-        print(f"  PDF OCR error: {e}")
-        return []
+    """Deprecated — use ocr_pdf_llm."""
+    return ocr_pdf_llm(pdf_bytes)
 
 
 # ── EXTRACT: school table (HTML, with OCR fallback) ───────────────────────────
@@ -582,55 +515,24 @@ def parse_topnotcher_from_text(text: str) -> list:
 
 def ocr_image(image_url: str, mode: str = "school") -> list:
     """
-    OCR an image using OCR.space first, then fall back to Claude if needed.
+    OCR an image using OCR.space first, then fall back to DeepSeek if needed.
     """
-    # Try OCR.space first (free, fast, good for tables)
     schools = ocr_image_ocrspace(image_url, mode)
     if schools:
         return schools
-    
-    # Fall back to Claude Vision OCR (requires credits)
-    if not KEY:
-        print("  No ANTHROPIC_API_KEY set; skipping Claude OCR fallback.")
-        return []
-    prompts = {
-        "school": (
-            "Extract the school performance table from this image. "
-            "Return ONLY a valid JSON array, no explanation:\n"
-            '[{"rank":1,"school":"School Name","takers":100,"passers":95,"pass_rate":95.0}]'
-        ),
-        "topnotcher": (
-            "Extract the top 10 board exam passers from this image. "
-            "Return ONLY a valid JSON array, no explanation:\n"
-            '[{"rank":1,"name":"LAST, FIRST MIDDLE","school":"School Name","rating":92.5}]'
-        ),
-    }
+
+    from ocr_llm import ocr_school_table_from_image
+
     try:
-        import anthropic
         raw = requests.get(image_url, timeout=30).content
-        b64 = base64.standard_b64encode(raw).decode()
-        
-        # Detect image type from URL extension
         media_type = "image/png" if image_url.lower().endswith(".png") else "image/jpeg"
-        
-        cl = anthropic.Anthropic(api_key=KEY)
-        msg = cl.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=4096,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image",
-                     "source": {"type": "base64", "media_type": media_type, "data": b64}},
-                    {"type": "text", "text": prompts[mode]},
-                ],
-            }],
-        )
-        txt = re.sub(r"```json|```", "", msg.content[0].text.strip()).strip()
-        return json.loads(txt)
-    except json.JSONDecodeError:
-        print("  OCR returned non-JSON; skipping.")
-        return []
+        data = ocr_school_table_from_image(raw, media_type)
+        if mode == "topnotcher":
+            return data
+        for item in data:
+            if "region" not in item:
+                item["region"] = infer_region(item.get("school", ""))
+        return data
     except Exception as e:
         print(f"  OCR error: {e}")
         return []
@@ -872,31 +774,39 @@ def scrape_direct_url(exam_code: str, year: int, month: str) -> None:
 def scrape(exam_code: str, year: int) -> None:
     """
     Scrape exam results for a given year by trying all typical exam cycles.
-    Uses direct URL construction instead of WordPress API search (which is unreliable).
+
+    Strategy per cycle:
+      1. prc.gov.ph — official POS PDF (2015–2022+ direct downloads)
+      2. prcboard.com — Drive embed / image OCR fallback
     """
     from programs import EXAM_CYCLES
-    
+    from prc_gov_ph import scrape_prc_month
+
     prog = PROGRAMS_DICT.get(exam_code)
     if not prog:
         print(f"\n⚠ Unknown exam code: {exam_code}")
         return
-    
-    # Get typical exam months for this program
+
     typical_months = EXAM_CYCLES.get(exam_code, ["March", "June", "September", "December"])
-    
+
     print(f"\n{'='*55}")
     print(f"  {exam_code} {year} — {prog['exam_name']}")
     print(f"  Will try months: {', '.join(typical_months)}")
     print(f"{'='*55}")
-    
+
     success_count = 0
     for month in typical_months:
         try:
+            if scrape_prc_month(exam_code, year, month):
+                print(f"  [OK] {month} {year} from prc.gov.ph")
+                success_count += 1
+                continue
+            print(f"  PRC.gov.ph miss for {month} {year}; trying prcboard.com...")
             scrape_direct_url(exam_code, year, month)
             success_count += 1
         except Exception as e:
             print(f"  Error scraping {month} {year}: {e}")
-    
+
     if success_count == 0:
         print(f"  ⚠ No data found for {exam_code} {year}")
 
@@ -1115,23 +1025,327 @@ def scrape_legacy(exam_code: str, year: int) -> None:
         db.finish_import_job(job_id, "failed", affected, str(e))
 
 
-def scrape_batch(targets: list) -> None:
-    for code, year in targets:
-        scrape(code, year)
-        time.sleep(2)
+def _find_prcboard_main_posts(exam_code: str, year: int) -> list:
+    """Discover prcboard.com list-of-passers posts that carry national summary stats."""
+    prcboard_slug = PRCBOARD_SLUGS.get(exam_code, exam_code.lower())
+    exam_name = EXAM_NAMES.get(exam_code, "")
+    exam_keywords = [
+        w for w in exam_name.split()
+        if len(w) > 4 and w.lower() not in ("licensure", "examination", "exam", "board")
+    ][:3]
+
+    def _title_text(post: dict) -> str:
+        return BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
+
+    def _is_main_post(post: dict) -> bool:
+        title = _title_text(post)
+        upper = title.upper()
+        lower = title.lower()
+        if re.match(r"^[A-Z]-[A-Z]\s+", title):
+            return False
+        if upper.startswith(("TOP SCHOOLS", "TOPNOTCHERS", "TOP 10", "ROOM ASSIGNMENTS")):
+            return False
+        return (
+            upper.startswith((exam_code + " RESULTS", prcboard_slug.upper() + " RESULTS"))
+            or ("list of passers" in lower and exam_code.lower() in lower)
+        )
+
+    main_posts: list = []
+    search_terms = [" ".join(exam_keywords[:2]), exam_code] if exam_keywords else [exam_code]
+    for search_term in search_terms:
+        posts = wp_search(f"{search_term} results {year}", n=30)
+        main_posts = [p for p in posts if _is_main_post(p)]
+        if main_posts:
+            print(f"  prcboard: {len(main_posts)} list-of-passers posts ({search_term})")
+            break
+
+    if not main_posts:
+        posts = wp_search(f"{prcboard_slug} {year}", n=50)
+        for p in posts:
+            title_lower = _title_text(p).lower()
+            slug_lower = p.get("slug", "").lower()
+            if (
+                ("results" in title_lower and "list of passers" in title_lower)
+                or f"{prcboard_slug}-results" in slug_lower
+            ) and _is_main_post(p):
+                main_posts.append(p)
+        if main_posts:
+            print(f"  prcboard: {len(main_posts)} list-of-passers posts (slug match)")
+
+    return main_posts
 
 
-def _cli() -> list:
-    args = sys.argv[1:]
+def _save_national_stats(
+    exam_code: str,
+    year: int,
+    month: str | None,
+    stats: dict,
+    url: str,
+    source: str,
+    processed: set,
+) -> bool:
+    """Upsert one exam cycle if not already saved this run."""
+    key = (month, year)
+    if key in processed:
+        return False
+    processed.add(key)
+    eid = db.upsert_exam_result(exam_code, month, year, stats, url)
+    db.audit("import", "exam_results", eid, {
+        "exam_code": exam_code,
+        "year": year,
+        "month": month,
+        "source": source,
+        "mode": "national_only",
+    })
+    print(
+        f"  [saved] {stats['total_passers']:,}/{stats['total_takers']:,} "
+        f"({stats['pass_rate']}%) - {month or '?'} {year} [{source}]"
+    )
+    return True
+
+
+def scrape_national_prc(exam_code: str, year: int, processed: set) -> int:
+    """National summary from prc.gov.ph result articles (no school PDF required)."""
+    from prc_gov_ph import discover_articles, fetch_html, get_summary as prc_get_summary
+
+    saved = 0
+    for article in discover_articles(exam_code, year):
+        try:
+            html = fetch_html(article["url"])
+            text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+            stats = prc_get_summary(text)
+            if not stats:
+                continue
+            month = article.get("month")
+            yr = article.get("year") or year
+            if yr and abs(yr - year) > 1:
+                continue
+            if _save_national_stats(exam_code, yr, month, stats, article["url"], "prc.gov.ph", processed):
+                saved += 1
+            time.sleep(PAUSE)
+        except Exception as e:
+            print(f"  prc.gov.ph error: {e}")
+    return saved
+
+
+def scrape_national_prcboard(exam_code: str, year: int, processed: set) -> int:
+    """National summary from prcboard.com list-of-passers posts."""
+    saved = 0
+    for post in _find_prcboard_main_posts(exam_code, year)[:8]:
+        title = BeautifulSoup(post["title"]["rendered"], "html.parser").get_text()
+        url = post["link"]
+        html = wp_get_content(post["id"])
+        text = BeautifulSoup(html, "html.parser").get_text()
+        stats = get_summary(text)
+        if not stats:
+            print(f"  No summary in: {title[:60]}")
+            continue
+        date = get_date(title, text)
+        if date["year"] and abs(date["year"] - year) > 1:
+            continue
+        yr = date["year"] or year
+        if _save_national_stats(exam_code, yr, date["month"], stats, url, "prcboard.com", processed):
+            saved += 1
+        time.sleep(PAUSE)
+    return saved
+
+
+def scrape_national_direct(exam_code: str, year: int, processed: set) -> int:
+    """Try predictable prcboard.com URLs for typical exam months."""
+    from programs import EXAM_CYCLES
+
+    prog = PROGRAMS_DICT.get(exam_code)
+    if not prog:
+        return 0
+
+    prcboard_slug = prog["prcboard_slug"]
+    name_slug = (
+        prog["exam_name"]
+        .lower()
+        .replace(" licensure examination", "")
+        .replace(" / ", "-")
+        .replace(" ", "-")
+    )
+    saved = 0
+    for month in EXAM_CYCLES.get(exam_code, ["March", "June", "September", "December"]):
+        month_lower = month.lower()
+        urls = [
+            f"{SITE}/{prcboard_slug}-results-{month_lower}-{year}-{name_slug}-list-of-passers",
+            f"{SITE}/top-schools-{month_lower}-{year}-{prcboard_slug}-results",
+        ]
+        for url in urls:
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=15)
+                if r.status_code != 200:
+                    continue
+                stats = get_summary(BeautifulSoup(r.text, "html.parser").get_text())
+                if stats and _save_national_stats(
+                    exam_code, year, month, stats, url, "prcboard.com/direct", processed
+                ):
+                    saved += 1
+                    break
+            except Exception as e:
+                print(f"  direct URL error ({month} {year}): {e}")
+            time.sleep(0.5)
+    return saved
+
+
+def scrape_national(exam_code: str, year: int) -> int:
+    """Collect national pass rate only — delegates to national_ingest pipeline."""
+    from national_ingest import ingest_program_year
+
+    prog = PROGRAMS_DICT.get(exam_code)
+    if not prog:
+        print(f"\n⚠ Unknown exam code: {exam_code}")
+        return 0
+
+    print(f"\n{'='*55}")
+    print(f"  NATIONAL {exam_code} {year} — {prog['exam_name']}")
+    print(f"{'='*55}")
+
+    try:
+        return ingest_program_year(exam_code, year)
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return 0
+
+
+def scrape_national_batch(start_year: int, end_year: int, exam_codes: list | None = None) -> None:
+    """Index + ingest national stats for a year range (replaces 192-job search loop)."""
+    from national_ingest import run_batch_national
+    from programs import ALL_CODES
+
+    codes = exam_codes or ALL_CODES
+    run_batch_national(start_year, end_year, codes)
+
+
+def _run_national_pipeline(args: list[str]) -> None:
+    """Delegate --national to collect_national_links / national_ingest."""
+    from pathlib import Path
+
+    import collect_national_links
+    import national_ingest
+
+    out_index = Path("output/national_links.json")
+
     if not args:
-        return [("CPALE", 2025), ("NLE", 2025), ("CELE", 2025),
-                ("LET-E", 2025), ("LET-S", 2025)]
+        print("Usage: scraper.py --national [--index|--ingest|--fill-gaps|--all] …")
+        return
+
+    if args[0] == "--index":
+        start = int(args[1]) if len(args) > 1 else 2015
+        end = int(args[2]) if len(args) > 2 else 2026
+        codes = [args[3].upper()] if len(args) > 3 else ALL_CODES
+        rows = collect_national_links.collect_index(start, end, codes)
+        collect_national_links.write_outputs(rows, Path("output"))
+        return
+
+    if args[0] == "--ingest":
+        path = Path(args[1]) if len(args) > 1 else out_index
+        national_ingest.ingest_index(path)
+        return
+
+    if args[0] == "--fill-gaps":
+        start = int(args[1]) if len(args) > 1 else 2015
+        end = int(args[2]) if len(args) > 2 else 2026
+        codes = [args[3].upper()] if len(args) > 3 else ALL_CODES
+        national_ingest.fill_gaps(start, end, codes, out_index)
+        return
+
     if args[0] == "--all":
+        start = int(args[1]) if len(args) > 1 else 2015
+        end = int(args[2]) if len(args) > 2 else 2026
+        if not out_index.is_file():
+            print(f"Building index {start}–{end} …")
+            rows = collect_national_links.collect_index(start, end, ALL_CODES)
+            collect_national_links.write_outputs(rows, Path("output"))
+        else:
+            print(f"Using existing index: {out_index}")
+        national_ingest.ingest_index(out_index)
+        return
+
+    # Single program + year: filter index or build small index
+    exam_code = args[0].upper()
+    year = int(args[1]) if len(args) > 1 else 2025
+    if exam_code not in PROGRAMS_DICT:
+        print(f"Unknown exam code: {exam_code}")
+        return
+    if not out_index.is_file():
+        rows = collect_national_links.collect_index(year, year, [exam_code])
+        collect_national_links.write_outputs(rows, Path("output"))
+    filtered = [
+        r for r in national_ingest.load_index(out_index)
+        if r["exam_code"] == exam_code and r["year"] == year
+    ]
+    if not filtered:
+        print(f"No index rows for {exam_code} {year}. Run --index first.")
+        return
+    tmp = Path("output") / f"_national_{exam_code}_{year}.json"
+    tmp.write_text(__import__("json").dumps(filtered, indent=2), encoding="utf-8")
+    try:
+        national_ingest.ingest_index(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def scrape_batch(targets: list, *, national_only: bool = False) -> None:
+    if national_only and targets:
+        codes = sorted({c for c, _ in targets})
+        years = [y for _, y in targets]
+        if len(codes) == len(ALL_CODES) and len(set(years)) == len(years):
+            start, end = min(years), max(years)
+            if set(years) == set(range(start, end + 1)):
+                scrape_national_batch(start, end, codes)
+                return
+    fn = scrape_national if national_only else scrape
+    failures: list[tuple[str, int, str]] = []
+    for code, year in targets:
+        try:
+            fn(code, year)
+        except Exception as e:
+            print(f"  BATCH ERROR {code} {year}: {e}")
+            failures.append((code, year, str(e)))
+        time.sleep(1 if national_only else 2)
+    if failures:
+        print(f"\n{len(failures)} target(s) had errors (batch continued).")
+
+
+def _cli() -> tuple[list[tuple[str, int]] | list[str], bool, bool]:
+    args = sys.argv[1:]
+    national_only = False
+    if args and args[0] == "--national":
+        national_only = True
+        args = args[1:]
+        # New pipeline subcommands — return args list for delegation
+        if args and args[0] in ("--index", "--ingest", "--fill-gaps", "--all"):
+            return args, True, True
+        if args and args[0] == "--all":
+            return args, True, True
+        if args and args[0] in PROGRAMS_DICT:
+            return args, True, True
+        if not args:
+            return ["--all", "2015", "2026"], True, True
+        return args, True, True
+
+    if not args:
+        return (
+            [("CPALE", 2025), ("NLE", 2025), ("CELE", 2025), ("LET-E", 2025), ("LET-S", 2025)],
+            False,
+            False,
+        )
+    if args[0] == "--all":
+        if len(args) >= 3:
+            start, end = int(args[1]), int(args[2])
+            return [(c, y) for c in ALL_CODES for y in range(start, end + 1)], national_only, False
         year = int(args[1]) if len(args) > 1 else 2025
-        return [(c, year) for c in ALL_CODES]
-    return [(args[0], int(args[1]))]
+        return [(c, year) for c in ALL_CODES], national_only, False
+    return [(args[0], int(args[1]))], national_only, False
 
 
 if __name__ == "__main__":
-    scrape_batch(_cli())
-    print("\nDone. Recompute scores:  python consistency.py")
+    result, national_only, delegate = _cli()
+    if national_only and delegate:
+        _run_national_pipeline(result if isinstance(result, list) else [])
+    else:
+        scrape_batch(result, national_only=national_only)
+    print("\nDone.")

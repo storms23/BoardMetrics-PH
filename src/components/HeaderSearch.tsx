@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function SearchBar({ initial = "" }: { initial?: string }) {
+export function HeaderSearch() {
   const router = useRouter();
-  const [q, setQ] = useState(initial);
+  const [q, setQ] = useState("");
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -15,17 +15,17 @@ export function SearchBar({ initial = "" }: { initial?: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="flex gap-2">
+    <form onSubmit={submit} className="hidden items-center gap-2 sm:flex">
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search schools or exams…"
-        className="field-input w-full px-4 py-3"
-        aria-label="Search"
+        placeholder="Search schools…"
+        className="field-input w-44 py-1.5 text-sm lg:w-56"
+        aria-label="Search schools"
       />
       <button
         type="submit"
-        className="rounded-lg bg-brand px-5 py-3 font-semibold text-white hover:bg-brand-dark"
+        className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-dark"
       >
         Search
       </button>

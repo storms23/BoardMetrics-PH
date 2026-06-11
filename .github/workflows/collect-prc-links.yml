@@ -1,0 +1,53 @@
+name: Collect PRC POS Links
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: "First year to scan"
+        required: true
+        default: "2015"
+      end_year:
+        description: "Last year to scan"
+        required: true
+        default: "2026"
+      exam_code:
+        description: "Optional single exam code (blank = all 16)"
+        required: false
+        default: ""
+
+jobs:
+  collect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: pip install -r requirements.txt
+
+      - name: Collect PRC.gov.ph POS links
+        working-directory: scraper
+        env:
+          START_YEAR: ${{ github.event.inputs.start_year }}
+          END_YEAR: ${{ github.event.inputs.end_year }}
+          EXAM_CODE: ${{ github.event.inputs.exam_code }}
+        run: |
+          if [ -n "$EXAM_CODE" ]; then
+            python prc_gov_ph.py "$EXAM_CODE" "$START_YEAR" "$END_YEAR" --collect --out output
+          else
+            python -c "from pathlib import Path; from prc_gov_ph import collect_links, ALL_CODES; collect_links(ALL_CODES, int('$START_YEAR'), int('$END_YEAR'), Path('output'))"
+          fi
+
+      - name: Upload link lists
+        uses: actions/upload-artifact@v4
+        with:
+          name: prc-pos-links-${{ github.event.inputs.start_year }}-${{ github.event.inputs.end_year }}
+          path: scraper/output/prc_pos_links.*
+          retention-days: 30

@@ -9,10 +9,19 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-ink-line bg-ink-soft p-5 ${className}`}>
+    <div
+      className={`rounded-xl border border-ink-line bg-ink-soft p-5 shadow-sm ${className}`}
+    >
       {children}
     </div>
   );
+}
+
+function StatValue({ value }: { value: React.ReactNode }) {
+  if (typeof value === "string" || typeof value === "number") {
+    return <span className="text-slate-950">{value}</span>;
+  }
+  return <>{value}</>;
 }
 
 export function StatCard({
@@ -26,20 +35,24 @@ export function StatCard({
 }) {
   return (
     <Card className="text-center">
-      <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold text-white">{value}</div>
-      {sub && <div className="mt-1 text-xs text-slate-500">{sub}</div>}
+      <div className="text-xs font-medium uppercase tracking-wider text-slate-600">
+        {label}
+      </div>
+      <div className="mt-1 text-2xl font-extrabold tabular-nums text-slate-950">
+        <StatValue value={value} />
+      </div>
+      {sub && <div className="mt-1 text-xs text-slate-600">{sub}</div>}
     </Card>
   );
 }
 
 const LABEL_COLORS: Record<ConsistencyLabel, string> = {
-  Excellent: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  "Very Good": "bg-green-500/15 text-green-300 border-green-500/30",
-  Good: "bg-sky-500/15 text-sky-300 border-sky-500/30",
-  Fair: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  Poor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
-  "Insufficient data": "bg-slate-500/15 text-slate-400 border-slate-500/30",
+  Excellent: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  "Very Good": "bg-green-50 text-green-800 border-green-200",
+  Good: "bg-sky-50 text-sky-800 border-sky-200",
+  Fair: "bg-amber-50 text-amber-800 border-amber-200",
+  Poor: "bg-rose-50 text-rose-800 border-rose-200",
+  "Insufficient data": "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 export function ConsistencyBadge({ label }: { label: ConsistencyLabel }) {
@@ -55,7 +68,7 @@ export function ConsistencyBadge({ label }: { label: ConsistencyLabel }) {
 export function PassRate({ value }: { value: number | null }) {
   if (value == null) return <span className="text-slate-500">—</span>;
   const color =
-    value >= 90 ? "text-emerald-300" : value >= 70 ? "text-sky-300" : "text-amber-300";
+    value >= 90 ? "text-emerald-700" : value >= 70 ? "text-sky-700" : "text-amber-700";
   return <span className={`font-semibold ${color}`}>{value.toFixed(2)}%</span>;
 }
 
@@ -68,8 +81,8 @@ export function EmptyState({
 }) {
   return (
     <Card className="text-center">
-      <div className="text-slate-300">{title}</div>
-      {hint && <div className="mt-1 text-sm text-slate-500">{hint}</div>}
+      <div className="text-slate-800">{title}</div>
+      {hint && <div className="mt-1 text-sm text-slate-600">{hint}</div>}
     </Card>
   );
 }
@@ -85,7 +98,7 @@ export function NotConnected() {
 
 export function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-600">
       {children}
     </h2>
   );
@@ -99,7 +112,10 @@ export function SchoolLink({
   name: string;
 }) {
   return (
-    <Link href={`/schools/${id}`} className="font-medium">
+    <Link
+      href={`/schools/${id}`}
+      className="no-underline-link font-medium text-brand hover:text-brand-dark"
+    >
       {name}
     </Link>
   );

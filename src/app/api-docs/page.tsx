@@ -31,9 +31,9 @@ export default function ApiDocsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-extrabold text-white">Public API</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          REST endpoints under <code className="text-brand-light">/api/v1</code>. JSON responses,
+        <h1 className="text-2xl font-extrabold text-slate-900">Public API</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          REST endpoints under <code className="text-brand">/api/v1</code>. JSON responses,
           pagination, filtering, sorting, and rate limiting. Machine-readable spec at{" "}
           <a href="/api/v1/openapi.json">/api/v1/openapi.json</a>.
         </p>
@@ -41,7 +41,7 @@ export default function ApiDocsPage() {
 
       <Card>
         <SectionTitle>Conventions</SectionTitle>
-        <ul className="space-y-1 text-sm text-slate-300">
+        <ul className="space-y-1 text-sm text-slate-700">
           <li>
             <strong>Pagination:</strong> <code>page</code>, <code>per_page</code> (max 100).
           </li>
@@ -63,12 +63,12 @@ export default function ApiDocsPage() {
         {ENDPOINTS.map((e) => (
           <Card key={e.path} className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
-              <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-xs text-emerald-300">
+              <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-xs text-emerald-700">
                 {e.method}
               </span>
-              <span className="font-mono text-sm text-white">{e.path}</span>
+              <span className="font-mono text-sm text-slate-900">{e.path}</span>
             </div>
-            <div className="text-sm text-slate-400">{e.desc}</div>
+            <div className="text-sm text-slate-600">{e.desc}</div>
             <a className="font-mono text-xs" href={e.example}>
               {e.example}
             </a>

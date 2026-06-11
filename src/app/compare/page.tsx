@@ -15,7 +15,7 @@ export default async function ComparePage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-extrabold text-white">Compare schools</h1>
+      <h1 className="text-2xl font-extrabold text-slate-900">Compare schools</h1>
       <CompareTool initialIds={initialIds} />
     </div>
   );

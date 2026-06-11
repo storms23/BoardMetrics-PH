@@ -59,7 +59,7 @@ export default async function SearchPage({
                     href={`/exams/${p.slug}`}
                     className="rounded-lg border border-ink-line bg-ink-soft p-3 hover:border-brand"
                   >
-                    <span className="font-medium text-white">{p.name}</span>{" "}
+                    <span className="font-medium text-slate-900">{p.name}</span>{" "}
                     <span className="font-mono text-xs text-slate-500">{p.examCode}</span>
                   </Link>
                 ))}
@@ -83,7 +83,7 @@ export default async function SearchPage({
                         href={`/schools/${s.id}`}
                         className="rounded-lg border border-ink-line bg-ink-soft p-3 hover:border-brand"
                       >
-                        <span className="font-medium text-white">{s.name}</span>
+                        <span className="font-medium text-slate-900">{s.name}</span>
                         {s.regions?.name && (
                           <span className="ml-2 text-xs text-slate-500">{s.regions.name}</span>
                         )}
@@ -99,7 +99,7 @@ export default async function SearchPage({
                   <Card>
                     <ul className="space-y-1 text-sm">
                       {topnotchers.map((t, i) => (
-                        <li key={i} className="text-slate-300">
+                        <li key={i} className="text-slate-700">
                           #{(t as any).exam_results?.programs?.exam_code} — {t.name} ({t.school},{" "}
                           {t.rating}%)
                         </li>

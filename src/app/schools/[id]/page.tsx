@@ -42,7 +42,7 @@ export default async function SchoolPage({
   if (!isSupabaseConfigured()) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-extrabold text-white">School profile</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">School profile</h1>
         <NotConnected />
       </div>
     );
@@ -75,8 +75,8 @@ export default async function SchoolPage({
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-extrabold text-white">{school.name}</h1>
-        <div className="mt-1 text-sm text-slate-400">
+        <h1 className="text-2xl font-extrabold text-slate-900">{school.name}</h1>
+        <div className="mt-1 text-sm text-slate-600">
           {[school.regions?.name, school.provinces?.name, school.school_type]
             .filter(Boolean)
             .join(" · ") || "Location not yet classified"}
@@ -131,8 +131,8 @@ export default async function SchoolPage({
           <Card>No historical results recorded yet.</Card>
         ) : (
           <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b border-ink-line text-left text-slate-400">
+            <table className="data-table w-full text-sm">
+              <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
                 <tr>
                   <th className="p-3">Year</th>
                   <th className="p-3">Examination</th>
@@ -145,7 +145,7 @@ export default async function SchoolPage({
               </thead>
               <tbody>
                 {history.map((h, i) => (
-                  <tr key={i} className="border-b border-ink-line/50">
+                  <tr key={i} className="border-b border-ink-line/80">
                     <td className="p-3">
                       {h.month ? `${h.month} ` : ""}
                       {h.year}
@@ -160,14 +160,14 @@ export default async function SchoolPage({
                     </td>
                     <td
                       className={`p-3 text-right ${
-                        (h.gap_from_national ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"
+                        (h.gap_from_national ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600"
                       }`}
                     >
                       {h.gap_from_national != null
                         ? `${h.gap_from_national >= 0 ? "+" : ""}${h.gap_from_national}`
                         : "—"}
                     </td>
-                    <td className="p-3 text-right text-slate-400">
+                    <td className="p-3 text-right text-slate-600">
                       {h.rank ? `#${h.rank}` : "—"}
                     </td>
                   </tr>

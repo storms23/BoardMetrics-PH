@@ -20,7 +20,7 @@ export default async function ExamsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-extrabold text-white">Board Examinations</h1>
+      <h1 className="text-2xl font-extrabold text-slate-900">Board Examinations</h1>
       <SectionTitle>{PROGRAMS.length} supported programs</SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {PROGRAMS.map((p) => {
@@ -28,12 +28,12 @@ export default async function ExamsPage() {
           return (
             <Link key={p.examCode} href={`/exams/${p.slug}`}>
               <Card className="h-full transition-colors hover:border-brand">
-                <div className="font-semibold text-white">{p.name}</div>
+                <div className="font-semibold text-slate-900">{p.name}</div>
                 <div className="mt-1 font-mono text-xs text-slate-500">{p.examCode}</div>
                 {s && (
-                  <div className="mt-3 text-xs text-slate-400">
+                  <div className="mt-3 text-xs text-slate-600">
                     Avg national pass rate:{" "}
-                    <span className="text-brand-light">{s.avg_national_pass_rate ?? "—"}%</span>
+                    <span className="text-brand">{s.avg_national_pass_rate ?? "—"}%</span>
                     <br />
                     Cycles tracked: {s.total_cycles}
                   </div>

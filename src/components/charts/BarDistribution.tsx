@@ -12,10 +12,10 @@ import {
 } from "recharts";
 
 const COLORS: Record<string, string> = {
-  "90-100%": "#34D399",
-  "80-89%": "#60A5FA",
-  "70-79%": "#FBBF24",
-  "Below 70%": "#FB7185",
+  "90-100%": "#059669",
+  "80-89%": "#0284c7",
+  "70-79%": "#d97706",
+  "Below 70%": "#e11d48",
 };
 
 export function BarDistribution({
@@ -26,21 +26,21 @@ export function BarDistribution({
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ top: 10, right: 20, bottom: 0, left: -10 }}>
-        <CartesianGrid stroke="#1A1A2E" strokeDasharray="3 3" />
-        <XAxis dataKey="band" stroke="#6A6A8A" fontSize={12} />
-        <YAxis stroke="#6A6A8A" fontSize={12} allowDecimals={false} />
+        <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+        <XAxis dataKey="band" stroke="#64748b" fontSize={12} />
+        <YAxis stroke="#64748b" fontSize={12} allowDecimals={false} />
         <Tooltip
-          cursor={{ fill: "#1A1A2E55" }}
+          cursor={{ fill: "#f1f5f980" }}
           contentStyle={{
-            background: "#0D0D1E",
-            border: "1px solid #1A1A2E",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
             borderRadius: 8,
-            color: "#E2E8F0",
+            color: "#0f172a",
           }}
         />
         <Bar dataKey="count" name="Schools" radius={[6, 6, 0, 0]}>
           {data.map((d) => (
-            <Cell key={d.band} fill={COLORS[d.band] ?? "#A78BFA"} />
+            <Cell key={d.band} fill={COLORS[d.band] ?? "#7c3aed"} />
           ))}
         </Bar>
       </BarChart>

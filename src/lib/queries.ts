@@ -1,5 +1,6 @@
 import { getServerClient } from "./supabase/server";
 import { computeConsistency, classifyTrend } from "./consistency";
+import { searchTokens } from "./school-search";
 
 /**
  * Shared data-access functions used by both /api/v1 route handlers and server
@@ -11,6 +12,39 @@ import { computeConsistency, classifyTrend } from "./consistency";
  * then use .in() on the direct FK column. This avoids a PostgREST limitation
  * where nested relationship filters return null rows instead of excluding them.
  */
+
+/** National row with real stats — excludes list-of-passers placeholder shells. */
+function isCompleteNationalRow(r: {
+  total_takers?: number | null;
+  pass_rate?: number | null;
+}) {
+  return (r.total_takers ?? 0) > 0 && r.pass_rate != null;
+}
+
+const MONTH_ORDER: Record<string, number> = {
+  January: 1,
+  February: 2,
+  March: 3,
+  April: 4,
+  May: 5,
+  June: 6,
+  July: 7,
+  August: 8,
+  September: 9,
+  October: 10,
+  November: 11,
+  December: 12,
+};
+
+function compareExamCycles(
+  a: { year: number; month?: string | null },
+  b: { year: number; month?: string | null },
+) {
+  if (a.year !== b.year) return a.year - b.year;
+  const ma = MONTH_ORDER[a.month ?? ""] ?? 0;
+  const mb = MONTH_ORDER[b.month ?? ""] ?? 0;
+  return ma - mb;
+}
 
 // ─── Shared helper: resolve program id + exam_result ids ───────────────────
 async function resolveExamResultIds(
@@ -53,6 +87,7 @@ export interface RankingFilters {
   year?: number;
   month?: string;
   region?: string;
+  school?: string;
   minTakers?: number;
   limit?: number;
 }
@@ -60,9 +95,18 @@ export interface RankingFilters {
 export interface AggregateRankingFilters {
   examCode: string;
   region?: string;
+  school?: string;
   minTakers?: number;
   minYears?: number;
   limit?: number;
+}
+
+function schoolMatchesSearch(schoolName: string, query?: string): boolean {
+  if (!query?.trim()) return true;
+  const name = schoolName.toLowerCase();
+  const tokens = searchTokens(query);
+  if (!tokens.length) return name.includes(query.trim().toLowerCase());
+  return tokens.every((t) => name.includes(t));
 }
 
 // ─── EXAMS ─────────────────────────────────────────────────────────────────
@@ -118,7 +162,9 @@ export async function getExamHistory(examCode: string, year?: number, month?: st
     .in("id", resolved.erIds)
     .order("year", { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  const rows = (data ?? []).filter(isCompleteNationalRow);
+  rows.sort((a, b) => -compareExamCycles(a, b));
+  return rows;
 }
 
 // ─── Top schools for a given exam cycle (most recent year by default) ───────
@@ -191,7 +237,11 @@ export async function listSchools(opts: {
   let q = sb
     .from("schools")
     .select("id, name, slug, school_type, regions(name, code)", { count: "exact" });
-  if (opts.search) q = q.ilike("name", `%${opts.search}%`);
+  if (opts.search) {
+    for (const token of searchTokens(opts.search)) {
+      q = q.ilike("name", `%${token}%`);
+    }
+  }
   if (opts.region) q = q.ilike("regions.name", `%${opts.region}%`);
 
   const { data, count, error } = await q
@@ -297,7 +347,7 @@ export async function getRankings(f: RankingFilters) {
     .in("exam_result_id", resolved.erIds);
   if (f.minTakers) q = q.gte("takers", f.minTakers);
 
-  const { data, error } = await q.order("rank", { ascending: true }).limit(f.limit ?? 100);
+  const { data, error } = await q.order("rank", { ascending: true }).limit(f.limit ?? 1000);
   if (error) throw error;
 
   let rows = (data ?? []).map((r: any) => {
@@ -315,6 +365,10 @@ export async function getRankings(f: RankingFilters) {
       national_rate: er?.pass_rate ?? null,
     };
   });
+
+  if (f.school) {
+    rows = rows.filter((r) => schoolMatchesSearch(r.school, f.school));
+  }
 
   if (f.region) {
     const reg = f.region.toLowerCase();
@@ -356,6 +410,7 @@ export async function getAggregateRankings(f: AggregateRankingFilters) {
     const year = resolved.erMap.get(r.exam_result_id)?.year;
 
     if (f.region && !school.regions?.name?.toLowerCase().includes(f.region.toLowerCase())) continue;
+    if (!schoolMatchesSearch(school.name, f.school)) continue;
 
     const g = schoolMap.get(sid) ?? {
       school_id: sid,
@@ -378,28 +433,34 @@ export async function getAggregateRankings(f: AggregateRankingFilters) {
   const results = [...schoolMap.values()]
     .filter((g) => g.rates.length > 0 && g.years.size >= minYears)
     .filter((g) => !f.minTakers || g.total_takers >= f.minTakers)
-    .map((g) => ({
-      school_id: g.school_id,
-      school: g.school,
-      slug: g.slug,
-      region: g.region,
-      avg_pass_rate:
-        Math.round(
-          (g.rates.reduce((a: number, b: number) => a + b, 0) / g.rates.length) * 100,
-        ) / 100,
-      best_pass_rate: Math.round(Math.max(...g.rates) * 100) / 100,
-      worst_pass_rate: Math.round(Math.min(...g.rates) * 100) / 100,
-      total_takers: g.total_takers,
-      total_passers: g.total_passers,
-      years_participated: g.years.size,
-    }))
-    .sort((a, b) => b.avg_pass_rate - a.avg_pass_rate)
-    .slice(0, f.limit ?? 100)
+    .map((g) => {
+      const weighted_pass_rate =
+        g.total_takers > 0
+          ? Math.round((g.total_passers / g.total_takers) * 10000) / 100
+          : 0;
+      return {
+        school_id: g.school_id,
+        school: g.school,
+        slug: g.slug,
+        region: g.region,
+        pass_rate: weighted_pass_rate,
+        avg_pass_rate: weighted_pass_rate,
+        best_pass_rate: Math.round(Math.max(...g.rates) * 100) / 100,
+        worst_pass_rate: Math.round(Math.min(...g.rates) * 100) / 100,
+        total_takers: g.total_takers,
+        total_passers: g.total_passers,
+        years_participated: g.years.size,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.pass_rate - a.pass_rate ||
+        b.total_takers - a.total_takers ||
+        b.total_passers - a.total_passers,
+    )
+    .slice(0, f.limit ?? 1000)
     .map((r, i) => ({ ...r, rank: i + 1 }));
-  
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] getAggregateRankings result", { resultCount: results.length, topSchool: results[0]?.school, topAvgRate: results[0]?.avg_pass_rate });
-  // #endregion
+
   return results;
 }
 
@@ -428,8 +489,19 @@ export async function listTopnotchers(opts: {
 // ─── SEARCH ────────────────────────────────────────────────────────────────
 export async function globalSearch(term: string) {
   const sb = getServerClient();
+  const tokens = searchTokens(term);
+
+  let schoolQ = sb.from("schools").select("id, name, slug, regions(name)");
+  if (tokens.length) {
+    for (const token of tokens) {
+      schoolQ = schoolQ.ilike("name", `%${token}%`);
+    }
+  } else if (term.trim().length >= 2) {
+    schoolQ = schoolQ.ilike("name", `%${term.trim()}%`);
+  }
+
   const [schools, topnotchers] = await Promise.all([
-    sb.from("schools").select("id, name, slug, regions(name)").ilike("name", `%${term}%`).limit(10),
+    schoolQ.order("name", { ascending: true }).limit(25),
     sb
       .from("topnotchers")
       .select("name, school, rating, exam_results!inner(year, programs!inner(exam_code))")
@@ -538,16 +610,19 @@ export async function examDifficulty(examCode: string) {
 
   const { data, error } = await sb
     .from("exam_results")
-    .select("id, year, month, pass_rate, total_takers")
-    .in("id", resolved.erIds)
-    .order("year", { ascending: true });
+    .select("id, year, month, pass_rate, total_takers, total_passers")
+    .in("id", resolved.erIds);
   if (error) throw error;
 
-  const flat = (data ?? []).map((r: any) => ({
+  const complete = (data ?? []).filter(isCompleteNationalRow);
+  complete.sort((a, b) => compareExamCycles(a, b));
+
+  const flat = complete.map((r: any) => ({
     year: r.year,
     month: r.month,
     national_pass_rate: r.pass_rate,
     total_takers: r.total_takers,
+    total_passers: r.total_passers,
   }));
   const rates = flat.map((r) => r.national_pass_rate).filter((x): x is number => x != null);
   return {
@@ -561,90 +636,92 @@ export async function examDifficulty(examCode: string) {
   };
 }
 
-// ─── LEADERBOARD: top by consistency score ────────────────────────────────
-export async function topByConsistency(limit = 25) {
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] topByConsistency called", { limit, timestamp: Date.now() });
-  // #endregion
-  const sb = getServerClient();
-  const { data, error } = await sb
-    .from("consistency_scores")
-    .select(
-      "score, label, avg_rate, years, schools!inner(id, name, slug, regions(name)), programs!inner(exam_code, name)",
-    )
-    .order("score", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] consistency_scores query result", { rowCount: data?.length ?? 0 });
-  // #endregion
+// ─── LEADERBOARD: per-program top schools by pass rate ────────────────────
+export type LeaderboardEntry = {
+  school: string;
+  school_id: number;
+  region: string | null;
+  exam_code: string;
+  pass_rate: number | null;
+  total_takers: number;
+  total_passers: number;
+  cycles: number;
+  cycle_label?: string;
+};
 
-  const rows = (data ?? []).map((r: any) => ({
-    school: r.schools.name,
-    school_id: r.schools.id,
-    region: r.schools.regions?.name ?? null,
-    exam_code: r.programs.exam_code,
-    score: r.score,
-    label: r.label,
-    avg_rate: r.avg_rate,
-    years: r.years,
-  }));
+export type ProgramLeaderboard = {
+  exam_code: string;
+  exam_name: string;
+  slug: string;
+  leaders: LeaderboardEntry[];
+};
 
-  // If consistency_scores is empty, fall back to an aggregate calculation
-  // directly from school_performance (needs ≥2 years to be meaningful)
-  if (rows.length === 0) {
-    // #region agent debug log
-    console.log("[PASA_DBG H-B,H-C] consistency_scores empty, using fallback");
-    // #endregion
-    return topByAggregateRate(limit);
+/** Rank by weighted pass rate: total passers ÷ total takers (min 10 examinees). */
+export async function topByPassRateForProgram(
+  examCode: string,
+  limit = 15,
+  minTakers = 10,
+): Promise<LeaderboardEntry[]> {
+  const aggregate = await getAggregateRankings({
+    examCode,
+    minTakers,
+    limit: 1000,
+  });
+
+  if (aggregate.length > 0) {
+    return aggregate.slice(0, limit).map((r) => ({
+      school: r.school,
+      school_id: r.school_id,
+      region: r.region,
+      exam_code: examCode,
+      pass_rate: r.pass_rate,
+      total_takers: r.total_takers,
+      total_passers: r.total_passers,
+      cycles: r.years_participated,
+    }));
   }
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] topByConsistency result", { rowCount: rows.length, topSchool: rows[0]?.school });
-  // #endregion
-  return rows;
+
+  const latest = await examTopSchools(examCode, undefined, undefined, 1000);
+  return latest
+    .filter((s) => (s.takers ?? 0) >= minTakers)
+    .sort(
+      (a, b) =>
+        (b.pass_rate ?? 0) - (a.pass_rate ?? 0) ||
+        (b.takers ?? 0) - (a.takers ?? 0),
+    )
+    .slice(0, limit)
+    .map((s) => ({
+      school: s.school,
+      school_id: s.school_id,
+      region: s.region,
+      exam_code: examCode,
+      pass_rate: s.pass_rate,
+      total_takers: s.takers ?? 0,
+      total_passers: s.passers ?? 0,
+      cycles: 1,
+      cycle_label:
+        s.month && s.year ? `${s.month} ${s.year}` : s.year ? String(s.year) : undefined,
+    }));
 }
 
-// Fallback leaderboard: aggregate pass rate across all programs/years
-async function topByAggregateRate(limit: number) {
-  const sb = getServerClient();
-  const { data, error } = await sb
-    .from("school_performance")
-    .select(
-      "pass_rate, exam_result_id, schools!inner(id, name, slug, regions(name)), exam_results!inner(year, programs!inner(exam_code))",
-    );
-  if (error || !data?.length) return [];
+/** One leaderboard section per board exam program (not mixed across exams). */
+export async function leaderboardByProgram(limitPerProgram = 15): Promise<ProgramLeaderboard[]> {
+  const { PROGRAMS } = await import("./programs");
+  const boards = await Promise.all(
+    PROGRAMS.map(async (p) => ({
+      exam_code: p.examCode,
+      exam_name: p.name,
+      slug: p.slug,
+      leaders: await topByPassRateForProgram(p.examCode, limitPerProgram),
+    })),
+  );
+  return boards.filter((b) => b.leaders.length > 0);
+}
 
-  const key = (r: any) => `${r.schools.id}__${r.exam_results.programs.exam_code}`;
-  const grouped = new Map<string, any>();
-  for (const r of data) {
-    const k = key(r);
-    const g = grouped.get(k) ?? {
-      school: (r as any).schools.name,
-      school_id: (r as any).schools.id,
-      region: (r as any).schools.regions?.name ?? null,
-      exam_code: (r as any).exam_results.programs.exam_code,
-      rates: [] as number[],
-      years: new Set<number>(),
-    };
-    if (r.pass_rate != null) g.rates.push(r.pass_rate);
-    g.years.add((r as any).exam_results.year);
-    grouped.set(k, g);
-  }
-
-  return [...grouped.values()]
-    .filter((g) => g.rates.length >= 2)
-    .map((g) => ({
-      school: g.school,
-      school_id: g.school_id,
-      region: g.region,
-      exam_code: g.exam_code,
-      avg_rate: Math.round((g.rates.reduce((a: number, b: number) => a + b, 0) / g.rates.length) * 100) / 100,
-      years: g.years.size,
-      score: null as number | null,
-      label: "Provisional" as string,
-    }))
-    .sort((a, b) => b.avg_rate - a.avg_rate)
-    .slice(0, limit);
+/** @deprecated Use leaderboardByProgram */
+export async function topByConsistency(limit = 25) {
+  const boards = await leaderboardByProgram(limit);
+  return boards.flatMap((b) => b.leaders).slice(0, limit);
 }
 
 // ─── EXAM POPULARITY (analytics #6) ──────────────────────────────────────────

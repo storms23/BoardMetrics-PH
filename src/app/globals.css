@@ -1,30 +1,57 @@
 @import "tailwindcss";
 
-/* Tailwind v4 theme — defines the brand/ink color utilities (bg-ink, text-brand-light, etc.). */
+/* Cohesive light theme — slate neutrals + blue accent */
 @theme {
-  --color-brand: #7c3aed;
-  --color-brand-dark: #5b21b6;
-  --color-brand-light: #a78bfa;
-  --color-ink: #0a0a14;
-  --color-ink-soft: #0d0d1e;
-  --color-ink-line: #1a1a2e;
+  --color-brand: #1d4ed8;
+  --color-brand-dark: #1e3a8a;
+  --color-brand-light: #2563eb;
+  --color-ink: #f8fafc;
+  --color-ink-soft: #ffffff;
+  --color-ink-line: #cbd5e1;
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   background-color: var(--color-ink);
-  color: #e2e8f0;
+  color: #0f172a;
   -webkit-font-smoothing: antialiased;
 }
 
-a {
-  color: var(--color-brand-light);
-  transition: color 0.15s ease;
+/* Content links only — avoid overriding nav/button styles */
+main a:not(.no-underline-link) {
+  color: var(--color-brand);
+  font-weight: 500;
 }
 
-a:hover {
-  color: #ffffff;
+main a:not(.no-underline-link):hover {
+  color: var(--color-brand-dark);
+  text-decoration: underline;
+}
+
+header a {
+  color: #475569;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+header a:hover {
+  color: var(--color-brand);
+  text-decoration: none;
+}
+
+@layer components {
+  .field-input {
+    @apply rounded-lg border border-ink-line bg-white px-3 py-2 text-slate-900 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
+  }
+
+  .data-table tbody tr:hover {
+    @apply bg-slate-100;
+  }
+
+  .data-table tbody tr:hover a {
+    color: var(--color-brand-dark);
+  }
 }
