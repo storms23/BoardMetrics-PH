@@ -74,6 +74,14 @@ export default async function SchoolPage({
 
   return (
     <div className="space-y-8">
+      <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+        School-level analytics are limited in this MVP — see{" "}
+        <Link href="/exams" className="font-medium text-brand hover:underline">
+          national exam trends
+        </Link>
+        .
+      </p>
+
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900">{school.name}</h1>
         <div className="mt-1 text-sm text-slate-600">
@@ -177,15 +185,6 @@ export default async function SchoolPage({
           </Card>
         )}
       </section>
-
-      <div>
-        <Link
-          href={`/compare?ids=${schoolId}`}
-          className="inline-block rounded-lg bg-brand px-4 py-2 font-semibold text-white hover:bg-brand-dark"
-        >
-          Add to comparison
-        </Link>
-      </div>
     </div>
   );
 }

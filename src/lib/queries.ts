@@ -1,5 +1,15 @@
 import { getServerClient } from "./supabase/server";
 import { computeConsistency, classifyTrend } from "./consistency";
+import {
+  avgPassRate,
+  compareExamCycles,
+  filterTrackerWindow,
+  formatCycleLabel,
+  isCompleteNationalRow,
+  sumNationalTotals,
+  type TrendLabel,
+} from "./exam-tracker";
+import { getProgramByCode } from "./programs";
 import { searchTokens } from "./school-search";
 
 /**
@@ -12,39 +22,6 @@ import { searchTokens } from "./school-search";
  * then use .in() on the direct FK column. This avoids a PostgREST limitation
  * where nested relationship filters return null rows instead of excluding them.
  */
-
-/** National row with real stats — excludes list-of-passers placeholder shells. */
-function isCompleteNationalRow(r: {
-  total_takers?: number | null;
-  pass_rate?: number | null;
-}) {
-  return (r.total_takers ?? 0) > 0 && r.pass_rate != null;
-}
-
-const MONTH_ORDER: Record<string, number> = {
-  January: 1,
-  February: 2,
-  March: 3,
-  April: 4,
-  May: 5,
-  June: 6,
-  July: 7,
-  August: 8,
-  September: 9,
-  October: 10,
-  November: 11,
-  December: 12,
-};
-
-function compareExamCycles(
-  a: { year: number; month?: string | null },
-  b: { year: number; month?: string | null },
-) {
-  if (a.year !== b.year) return a.year - b.year;
-  const ma = MONTH_ORDER[a.month ?? ""] ?? 0;
-  const mb = MONTH_ORDER[b.month ?? ""] ?? 0;
-  return ma - mb;
-}
 
 // ─── Shared helper: resolve program id + exam_result ids ───────────────────
 async function resolveExamResultIds(
@@ -114,11 +91,11 @@ export async function listExams() {
   const sb = getServerClient();
   const { data, error } = await sb
     .from("exam_results")
-    .select("year, pass_rate, total_takers, programs!inner(exam_code, name, slug)");
+    .select("year, pass_rate, total_takers, total_passers, programs!inner(exam_code, name, slug)");
   if (error) throw error;
 
   const grouped = new Map<string, any>();
-  for (const r of data ?? []) {
+  for (const r of filterTrackerWindow(data ?? [])) {
     const p = (r as any).programs;
     const code = p.exam_code;
     const g = grouped.get(code) ?? {
@@ -126,14 +103,20 @@ export async function listExams() {
       exam_fullname: p.name,
       slug: p.slug,
       total_cycles: 0,
+      complete_cycles: 0,
       years: [] as number[],
       rates: [] as number[],
-      all_time_takers: 0,
+      total_takers: 0,
+      total_passers: 0,
     };
     g.total_cycles += 1;
     g.years.push(r.year);
-    if (r.pass_rate != null) g.rates.push(r.pass_rate);
-    g.all_time_takers += r.total_takers ?? 0;
+    if (isCompleteNationalRow(r)) {
+      g.complete_cycles += 1;
+      if (r.pass_rate != null) g.rates.push(r.pass_rate);
+      g.total_takers += r.total_takers ?? 0;
+      g.total_passers += (r as any).total_passers ?? 0;
+    }
     grouped.set(code, g);
   }
 
@@ -142,29 +125,61 @@ export async function listExams() {
     exam_fullname: g.exam_fullname,
     slug: g.slug,
     total_cycles: g.total_cycles,
-    latest_year: Math.max(...g.years),
-    earliest_year: Math.min(...g.years),
+    complete_cycles: g.complete_cycles,
+    latest_year: g.years.length ? Math.max(...g.years) : null,
+    earliest_year: g.years.length ? Math.min(...g.years) : null,
     avg_national_pass_rate: g.rates.length
       ? Math.round((g.rates.reduce((a: number, b: number) => a + b, 0) / g.rates.length) * 100) / 100
       : null,
-    all_time_takers: g.all_time_takers,
+    total_takers: g.total_takers,
+    total_passers: g.total_passers,
   }));
 }
 
-export async function getExamHistory(examCode: string, year?: number, month?: string) {
+export async function getExamCycles(examCode: string, year?: number, month?: string) {
   const sb = getServerClient();
   const resolved = await resolveExamResultIds(examCode, year, month);
   if (!resolved || !resolved.erIds.length) return [];
 
   const { data, error } = await sb
     .from("exam_results")
-    .select("*, programs!inner(exam_code, name, slug)")
+    .select("id, year, month, total_takers, total_passers, pass_rate, source_url, programs!inner(exam_code, name, slug)")
     .in("id", resolved.erIds)
     .order("year", { ascending: false });
   if (error) throw error;
-  const rows = (data ?? []).filter(isCompleteNationalRow);
+
+  const rows = data ?? [];
   rows.sort((a, b) => -compareExamCycles(a, b));
   return rows;
+}
+
+export async function getExamHistory(examCode: string, year?: number, month?: string) {
+  const rows = await getExamCycles(examCode, year, month);
+  return rows.filter(isCompleteNationalRow);
+}
+
+export async function examTopnotchersLatest(examCode: string, limit = 10) {
+  const sb = getServerClient();
+  const cycles = await getExamCycles(examCode);
+  const latestComplete = cycles.find(isCompleteNationalRow);
+  if (!latestComplete) return { cycle: null as null, topnotchers: [] as any[] };
+
+  const { data, error } = await sb
+    .from("topnotchers")
+    .select("rank, name, school, rating")
+    .eq("exam_result_id", latestComplete.id)
+    .order("rank", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  return {
+    cycle: {
+      year: latestComplete.year,
+      month: latestComplete.month,
+      label: `${latestComplete.month ?? ""} ${latestComplete.year}`.trim(),
+    },
+    topnotchers: data ?? [],
+  };
 }
 
 // ─── Top schools for a given exam cycle (most recent year by default) ───────
@@ -606,7 +621,16 @@ export async function schoolTrend(schoolId: number, examCode?: string) {
 export async function examDifficulty(examCode: string) {
   const sb = getServerClient();
   const resolved = await resolveExamResultIds(examCode);
-  if (!resolved || !resolved.erIds.length) return { exam_code: examCode, data: [], avg_rate: null, highest_rate: null, lowest_rate: null };
+  if (!resolved || !resolved.erIds.length) {
+    return {
+      exam_code: examCode,
+      data: [],
+      avg_rate: null,
+      highest_rate: null,
+      lowest_rate: null,
+      trend: "Insufficient data" as TrendLabel,
+    };
+  }
 
   const { data, error } = await sb
     .from("exam_results")
@@ -614,7 +638,8 @@ export async function examDifficulty(examCode: string) {
     .in("id", resolved.erIds);
   if (error) throw error;
 
-  const complete = (data ?? []).filter(isCompleteNationalRow);
+  const windowed = filterTrackerWindow(data ?? []);
+  const complete = windowed.filter(isCompleteNationalRow);
   complete.sort((a, b) => compareExamCycles(a, b));
 
   const flat = complete.map((r: any) => ({
@@ -633,7 +658,57 @@ export async function examDifficulty(examCode: string) {
       : null,
     highest_rate: rates.length ? Math.max(...rates) : null,
     lowest_rate: rates.length ? Math.min(...rates) : null,
+    trend: classifyTrend(rates) as TrendLabel,
   };
+}
+
+export type CompareExamResult = {
+  exam_code: string;
+  name: string;
+  slug: string;
+  latest_rate: number | null;
+  latest_cycle: string | null;
+  avg_10yr: number | null;
+  trend: TrendLabel;
+  recent_cycles: { label: string; rate: number | null; takers: number | null }[];
+};
+
+export async function compareExams(codes: string[]): Promise<CompareExamResult[]> {
+  const unique = [...new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean))];
+
+  const results = await Promise.all(
+    unique.map(async (code) => {
+      const program = getProgramByCode(code);
+      if (!program) return null;
+
+      const [difficulty, cycles] = await Promise.all([
+        examDifficulty(code),
+        getExamCycles(code),
+      ]);
+
+      const windowed = filterTrackerWindow(cycles);
+      const complete = windowed.filter(isCompleteNationalRow);
+      const sortedDesc = [...complete].sort((a, b) => -compareExamCycles(a, b));
+      const latest = sortedDesc[0];
+
+      return {
+        exam_code: code,
+        name: program.name,
+        slug: program.slug,
+        latest_rate: latest?.pass_rate ?? null,
+        latest_cycle: latest ? formatCycleLabel(latest.month, latest.year) : null,
+        avg_10yr: avgPassRate(complete),
+        trend: difficulty.trend,
+        recent_cycles: sortedDesc.slice(0, 3).map((r) => ({
+          label: formatCycleLabel(r.month, r.year),
+          rate: r.pass_rate,
+          takers: r.total_takers,
+        })),
+      };
+    }),
+  );
+
+  return results.filter((r): r is CompareExamResult => r != null);
 }
 
 // ─── LEADERBOARD: per-program top schools by pass rate ────────────────────
@@ -732,10 +807,10 @@ export async function examPopularity() {
       exam_code: e.exam_code,
       exam_fullname: e.exam_fullname,
       slug: e.slug,
-      all_time_takers: e.all_time_takers,
+      total_takers: e.total_takers,
       cycles: e.total_cycles,
     }))
-    .sort((a, b) => b.all_time_takers - a.all_time_takers);
+    .sort((a, b) => b.total_takers - a.total_takers);
 }
 
 // ─── DISTRIBUTION (analytics #10) ────────────────────────────────────────────

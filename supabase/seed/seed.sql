@@ -1,4 +1,4 @@
--- Pasa Rate PH — seed data: 16 MVP programs + Philippine regions + key provinces.
+-- Pasa Rate PH — seed data: 15 MVP programs + Philippine regions + key provinces.
 -- Idempotent: safe to run multiple times.
 
 -- ─── Programs (must match src/lib/programs.ts) ────────────────────────────────
@@ -17,7 +17,6 @@ insert into programs (exam_code, name, level, slug) values
   ('ALE',    'Architects Licensure Examination',                  null, 'architecture'),
   ('PhLE',   'Pharmacist Licensure Examination',                  null, 'pharmacy'),
   ('PSY',    'Psychologist / Psychometrician Licensure Examination', null, 'psychology'),
-  ('DLE',    'Dentist Licensure Examination',                     null, 'dentistry'),
   ('AgriLE', 'Agriculturist Licensure Examination',               null, 'agriculture')
 on conflict (exam_code) do update
   set name = excluded.name, level = excluded.level, slug = excluded.slug;

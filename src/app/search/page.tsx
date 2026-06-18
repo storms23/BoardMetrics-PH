@@ -27,29 +27,38 @@ export default async function SearchPage({
     : [];
 
   let schools: any[] = [];
-  let topnotchers: any[] = [];
   let connected = isSupabaseConfigured();
   if (connected && term.length >= 2) {
     try {
       const res = await globalSearch(term);
       schools = res.schools;
-      topnotchers = res.topnotchers;
     } catch {
       connected = false;
     }
   }
 
+  const hasExamMatches = examMatches.length > 0;
+  const hasSchoolMatches = schools.length > 0;
+  const noResults = term.length >= 2 && !hasExamMatches && !hasSchoolMatches;
+
   return (
     <div className="space-y-6">
       <div className="max-w-xl">
         <SearchBar initial={term} />
+        <p className="mt-1 text-xs text-slate-500">
+          Search by exam name or code — e.g. Nursing, Civil Engineering, NLE.
+        </p>
       </div>
 
       {term.length < 2 ? (
         <EmptyState title="Type at least 2 characters to search." />
+      ) : noResults && !connected ? (
+        <NotConnected />
+      ) : noResults ? (
+        <EmptyState title="No matching exams or schools." />
       ) : (
         <>
-          {examMatches.length > 0 && (
+          {hasExamMatches && (
             <section>
               <SectionTitle>Examinations</SectionTitle>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -67,48 +76,40 @@ export default async function SearchPage({
             </section>
           )}
 
-          {!connected ? (
+          {!connected && !hasExamMatches ? (
             <NotConnected />
-          ) : (
-            <>
-              <section>
-                <SectionTitle>Schools</SectionTitle>
-                {schools.length === 0 ? (
-                  <EmptyState title="No matching schools yet." />
-                ) : (
-                  <div className="grid gap-2">
-                    {schools.map((s) => (
-                      <Link
-                        key={s.id}
-                        href={`/schools/${s.id}`}
-                        className="rounded-lg border border-ink-line bg-ink-soft p-3 hover:border-brand"
-                      >
-                        <span className="font-medium text-slate-900">{s.name}</span>
-                        {s.regions?.name && (
-                          <span className="ml-2 text-xs text-slate-500">{s.regions.name}</span>
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
+          ) : hasSchoolMatches ? (
+            <section>
+              <SectionTitle>Schools</SectionTitle>
+              <p className="mb-3 text-xs text-slate-500">
+                School search is limited in this MVP — national exam pages have the full
+                pass-rate history.
+              </p>
+              <div className="grid gap-2">
+                {schools.map((s) => (
+                  <Link
+                    key={s.id}
+                    href={`/schools/${s.id}`}
+                    className="rounded-lg border border-ink-line/80 bg-white p-3 text-sm hover:border-brand"
+                  >
+                    <span className="font-medium text-slate-800">{s.name}</span>
+                    {s.regions?.name && (
+                      <span className="ml-2 text-xs text-slate-500">{s.regions.name}</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
-              {topnotchers.length > 0 && (
-                <section>
-                  <SectionTitle>Topnotchers</SectionTitle>
-                  <Card>
-                    <ul className="space-y-1 text-sm">
-                      {topnotchers.map((t, i) => (
-                        <li key={i} className="text-slate-700">
-                          #{(t as any).exam_results?.programs?.exam_code} — {t.name} ({t.school},{" "}
-                          {t.rating}%)
-                        </li>
-                      ))}
-                    </ul>
-                  </Card>
-                </section>
-              )}
-            </>
+          {connected && hasExamMatches && !hasSchoolMatches && (
+            <Card className="text-sm text-slate-600">
+              Looking for national trends? Open an exam above or browse{" "}
+              <Link href="/exams" className="text-brand hover:underline">
+                all examinations
+              </Link>
+              .
+            </Card>
           )}
         </>
       )}

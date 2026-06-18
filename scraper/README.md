@@ -54,6 +54,12 @@ python national_gap_fill.py AgriLE 2015 2026
 python national_gap_fill.py --all 2015 2026
 # or legacy:  python national_ingest.py --fill-gaps 2015 2026
 
+# Step 3b: re-ingest placeholder shells (total_takers=0) from prc.gov.ph
+# LET-E / LET-S share one PRC article — pass both codes together.
+python national_reingest_placeholders.py LET-E LET-S MTLE PSY REE 2015 2026
+python national_reingest_placeholders.py --all 2015 2026
+python national_reingest_placeholders.py MTLE 2025 2025 --dry-run
+
 # Full pipeline (build index if missing, then ingest)
 python scraper.py --national --all 2015 2026
 
@@ -67,6 +73,8 @@ Before re-ingesting after a bad backfill, audit and remove wrong-year rows:
 python cleanup_national.py --audit
 python cleanup_national.py --delete --dry-run
 python cleanup_national.py --delete
+python cleanup_national.py --delete-placeholders --dry-run
+python cleanup_national.py --delete-placeholders   # dead prcboard shells after re-ingest
 python cleanup_national.py --delete-all-bad --dry-run   # placeholders + dupes + mismatches
 python cleanup_national.py --delete-all-bad
 ```
@@ -97,6 +105,7 @@ python national_ingest.py --dry-run --from-index output/national_links.json
 - `collect_national_links.py`  — Phase 1: national results URL index
 - `national_ingest.py`         — Phase 2: validated national upserts
 - `national_gap_fill.py`       — on-demand gap discovery + ingest
+- `national_reingest_placeholders.py` — overwrite placeholder rows from prc.gov.ph (LET dual)
 - `ocr_llm.py`                 — DeepSeek vision OCR (school tables + stat images)
 - `national_extract.py`        — regex summary extraction (shared)
 - `national_validate.py`       — strict year/exam/rate validation

@@ -43,6 +43,40 @@ def _build_stats(passers: int, takers: int, rate: float | None = None) -> dict:
     }
 
 
+LET_DUAL_RE = re.compile(
+    r"([\d,]+)\s+elementary teachers?\s+out\s+of\s+([\d,]+)\s+examinees?\s*\(([\d.]+)%?\)"
+    r".*?"
+    r"([\d,]+)\s+secondary teachers?\s+out\s+of\s+([\d,]+)\s+examinees?\s*\(([\d.]+)%?\)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_let_dual_stats(text: str) -> dict[str, dict] | None:
+    """
+    PRC often publishes LET elementary + secondary stats in one announcement.
+    Returns {"LET-E": stats, "LET-S": stats} or None.
+    """
+    m = LET_DUAL_RE.search(text)
+    if not m:
+        return None
+    try:
+        e_stats = _build_stats(
+            int(m.group(1).replace(",", "")),
+            int(m.group(2).replace(",", "")),
+            float(m.group(3).replace(",", "")),
+        )
+        s_stats = _build_stats(
+            int(m.group(4).replace(",", "")),
+            int(m.group(5).replace(",", "")),
+            float(m.group(6).replace(",", "")),
+        )
+        if e_stats and s_stats:
+            return {"LET-E": e_stats, "LET-S": s_stats}
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 def get_summary(text: str) -> dict | None:
     """
     Extract national exam statistics from page or PDF text.
@@ -185,6 +219,11 @@ def extract_stats_from_html(html: str, page_url: str) -> dict | None:
     if stats:
         return stats
 
+    let_dual = parse_let_dual_stats(text)
+    if let_dual:
+        # Caller must use extract_let_dual_from_url for both programs.
+        return None
+
     for pdf_url in _find_pdf_links(html, page_url)[:3]:
         stats = extract_summary_from_pdf_url(pdf_url)
         if stats:
@@ -201,6 +240,19 @@ def extract_stats_from_html(html: str, page_url: str) -> dict | None:
         pass
 
     return None
+
+
+def extract_let_dual_from_url(url: str) -> tuple[dict[str, dict] | None, str]:
+    """Fetch a PRC LET announcement and return stats for LET-E and LET-S."""
+    try:
+        status, html = fetch_html_raw(url, timeout=25)
+        if status != 200:
+            return None, ""
+        text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+        dual = parse_let_dual_stats(text)
+        return dual, text
+    except requests.RequestException:
+        return None, ""
 
 
 def extract_stats_from_url(url: str) -> tuple[dict | None, str]:

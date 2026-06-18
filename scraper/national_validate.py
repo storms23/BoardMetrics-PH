@@ -170,6 +170,13 @@ def infer_month_from_cycles(exam_code: str, year: int, title: str, url: str) -> 
     return None
 
 
+def is_placeholder_row(row: dict | None) -> bool:
+    """Shell row from list-of-passers ingest with no real national stats."""
+    if not row:
+        return False
+    return (row.get("total_takers") or 0) <= 0
+
+
 def validate_stats(stats: dict) -> tuple[bool, str]:
     takers = stats.get("total_takers") or 0
     passers = stats.get("total_passers") or 0

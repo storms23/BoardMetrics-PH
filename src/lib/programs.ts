@@ -121,13 +121,6 @@ export const PROGRAMS: Program[] = [
     scrapeKeywords: ["psychometrician licensure", "psychologist licensure", "psychology board"],
   },
   {
-    examCode: "DLE",
-    name: "Dentist Licensure Examination",
-    level: null,
-    slug: "dentistry",
-    scrapeKeywords: ["dentist licensure", "dentistry board", "DLE"],
-  },
-  {
     examCode: "AgriLE",
     name: "Agriculturist Licensure Examination",
     level: null,

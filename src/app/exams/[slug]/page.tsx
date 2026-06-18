@@ -1,16 +1,32 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { Card, StatCard, SectionTitle, NotConnected, PassRate, SchoolLink } from "@/components/ui";
-import { LineTrend } from "@/components/charts/LineTrend";
-import { BarDistribution } from "@/components/charts/BarDistribution";
+import { ExamHistoryPanel } from "@/components/ExamHistoryPanel";
+import {
+  Card,
+  CoverageBadge,
+  FailedRate,
+  NotConnected,
+  PassRate,
+  SectionTitle,
+  StatCard,
+  TrackerScope,
+} from "@/components/ui";
+import {
+  avgPassRate,
+  compareExamCycles,
+  computeCoverage,
+  enrichCycles,
+  failedRate,
+  filterTrackerWindow,
+  formatCycleLabel,
+  isCompleteNationalRow,
+  shortCycleLabel,
+  sumNationalTotals,
+  trackerYearRange,
+  TRACKER_WINDOW_YEARS,
+} from "@/lib/exam-tracker";
 import { getProgramBySlug, PROGRAMS } from "@/lib/programs";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
-import {
-  examDifficulty,
-  examTopSchools,
-  getExamHistory,
-  passRateDistribution,
-} from "@/lib/queries";
+import { examDifficulty, examTopnotchersLatest, getExamCycles } from "@/lib/queries";
+import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -46,16 +62,18 @@ export default async function ExamPage({
     );
   }
 
-  let history: any[] = [];
-  let topSchools: any[] = [];
-  let difficulty: any = null;
-  let distribution: any[] = [];
+  let cycles: Awaited<ReturnType<typeof getExamCycles>> = [];
+  let difficulty: Awaited<ReturnType<typeof examDifficulty>> | null = null;
+  let topnotcherData: Awaited<ReturnType<typeof examTopnotchersLatest>> = {
+    cycle: null,
+    topnotchers: [],
+  };
+
   try {
-    [history, topSchools, difficulty, distribution] = await Promise.all([
-      getExamHistory(program.examCode),
-      examTopSchools(program.examCode, undefined, undefined, 15),
+    [cycles, difficulty, topnotcherData] = await Promise.all([
+      getExamCycles(program.examCode),
       examDifficulty(program.examCode),
-      passRateDistribution(program.examCode),
+      examTopnotchersLatest(program.examCode),
     ]);
   } catch {
     return (
@@ -66,43 +84,168 @@ export default async function ExamPage({
     );
   }
 
-  const latest = history[0];
-  const trendData = (difficulty?.data ?? []).map((d: any) => ({
-    label: `${d.month ?? ""} ${d.year}`.trim(),
-    national: d.national_pass_rate,
-  }));
-  const topSchoolYear = topSchools[0]?.year;
+  const windowed = filterTrackerWindow(cycles);
+  const complete = windowed.filter(isCompleteNationalRow);
+  const enriched = enrichCycles(windowed);
+  const coverage = computeCoverage(windowed, complete);
+  const latest = complete[0] ?? windowed[0];
+  const tenYearAvg = avgPassRate(complete);
+  const { totalTakers, totalPassers, totalFailed } = sumNationalTotals(complete);
+  const windowRange = trackerYearRange();
+  const totalsSub =
+    complete.length > 0
+      ? `${TRACKER_WINDOW_YEARS}-year sum · ${complete.length} cycle${complete.length === 1 ? "" : "s"}`
+      : undefined;
+
+  const trendData = (difficulty?.data ?? []).map((d) => {
+    const fullLabel = formatCycleLabel(d.month, d.year);
+    return {
+      label: shortCycleLabel(d.month, d.year),
+      fullLabel,
+      national: d.national_pass_rate,
+    };
+  });
+
+  const volumeData = [...complete]
+    .sort((a, b) => compareExamCycles(a, b))
+    .map((d) => {
+      const fullLabel = formatCycleLabel(d.month, d.year);
+      return {
+        label: shortCycleLabel(d.month, d.year),
+        fullLabel,
+        takers: d.total_takers,
+      };
+    });
+
+  const combinedData = [...complete]
+    .sort((a, b) => compareExamCycles(a, b))
+    .map((d) => {
+      const fullLabel = formatCycleLabel(d.month, d.year);
+      return {
+        label: shortCycleLabel(d.month, d.year),
+        fullLabel,
+        passRate: d.pass_rate,
+        takers: d.total_takers,
+      };
+    });
+
+  const historyTitle =
+    coverage.yearFrom != null && coverage.yearTo != null
+      ? `National results (${coverage.yearFrom}–${coverage.yearTo})`
+      : `National results (${windowRange.from}–${windowRange.to})`;
+
+  const hasCompleteData = complete.length > 0;
+  const highestPass = [...complete]
+    .filter((row) => row.pass_rate != null)
+    .sort((a, b) => (b.pass_rate ?? 0) - (a.pass_rate ?? 0))[0];
+  const highestFailed = [...complete]
+    .map((row) => ({ row, rate: failedRate(row) }))
+    .filter((x): x is { row: (typeof complete)[number]; rate: number } => x.rate != null)
+    .sort((a, b) => b.rate - a.rate)[0];
+  const scopeLabel =
+    coverage.yearFrom != null && coverage.yearTo != null
+      ? `${coverage.yearFrom}–${coverage.yearTo}`
+      : `${windowRange.from}–${windowRange.to}`;
 
   return (
     <div className="space-y-8">
-      <div>
+      <div className="space-y-2">
         <div className="font-mono text-xs text-slate-500">{program.examCode}</div>
         <h1 className="text-2xl font-extrabold text-slate-900">{program.name}</h1>
+        {hasCompleteData && coverage.yearFrom != null && coverage.yearTo != null ? (
+          <TrackerScope
+            cycleCount={complete.length}
+            yearFrom={coverage.yearFrom}
+            yearTo={coverage.yearTo}
+            windowYears={TRACKER_WINDOW_YEARS}
+          />
+        ) : (
+          <CoverageBadge label={coverage.label} />
+        )}
+        <p className="max-w-2xl text-sm text-slate-600">
+          {hasCompleteData
+            ? `Official national pass rates from PRC result cycles within this ${TRACKER_WINDOW_YEARS}-year window. Stat cards and the table below use complete cycles only.`
+            : `National pass rates from PRC result cycles — ${TRACKER_WINDOW_YEARS}-year tracker (${windowRange.from}–${windowRange.to}).`}
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label="Latest National Rate"
-          value={latest ? <PassRate value={latest.pass_rate} /> : "—"}
-          sub={latest ? `${latest.month ?? ""} ${latest.year}`.trim() : undefined}
-        />
-        <StatCard
-          label="Total Examinees"
-          value={
-            latest?.total_takers != null ? latest.total_takers.toLocaleString() : "—"
-          }
-        />
-        <StatCard
-          label="Total Passers"
-          value={
-            latest?.total_passers != null ? latest.total_passers.toLocaleString() : "—"
-          }
-        />
-        <StatCard
-          label="Avg Rate (all years)"
-          value={difficulty?.avg_rate != null ? `${difficulty.avg_rate}%` : "—"}
-          sub={`High ${difficulty?.highest_rate ?? "—"}% · Low ${difficulty?.lowest_rate ?? "—"}%`}
-        />
+      {!hasCompleteData && (
+        <Card className="border-amber-200 bg-amber-50 text-sm text-amber-900">
+          {windowed.length > 0 ? (
+            <>
+              National examinee and pass-rate stats are not available yet for this program.
+              {coverage.incompleteCount > 0 && (
+                <> {coverage.incompleteCount} cycle(s) were ingested as placeholders.</>
+              )}
+            </>
+          ) : (
+            <>No exam cycles have been ingested for this program yet.</>
+          )}
+        </Card>
+      )}
+
+      <div className="space-y-2">
+        {/* Primary rates — wide hero row */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <StatCard
+            variant="hero"
+            tone="highlight"
+            label="Latest Pass Rate"
+            value={latest?.pass_rate != null ? <PassRate value={latest.pass_rate} /> : "—"}
+            sub={latest ? formatCycleLabel(latest.month, latest.year) : undefined}
+          />
+          <StatCard
+            variant="hero"
+            tone="pass"
+            label="Highest Pass Rate"
+            value={highestPass?.pass_rate != null ? <PassRate value={highestPass.pass_rate} /> : "—"}
+            sub={
+              highestPass
+                ? `${formatCycleLabel(highestPass.month, highestPass.year)} · ${scopeLabel}`
+                : undefined
+            }
+          />
+          <StatCard
+            variant="hero"
+            tone="fail"
+            label="Highest Failed Rate"
+            value={highestFailed ? <FailedRate value={highestFailed.rate} /> : "—"}
+            sub={
+              highestFailed
+                ? `${formatCycleLabel(highestFailed.row.month, highestFailed.row.year)} · ${scopeLabel}`
+                : undefined
+            }
+          />
+        </div>
+        {/* Volume + average — compact summary strip */}
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <StatCard
+            variant="summary"
+            label="10-Year Avg Pass Rate"
+            value={tenYearAvg != null ? `${tenYearAvg}%` : "—"}
+            sub={`High ${difficulty?.highest_rate ?? "—"}% · Low ${difficulty?.lowest_rate ?? "—"}%`}
+          />
+          <StatCard
+            variant="summary"
+            label="Total Examinees"
+            value={totalTakers > 0 ? totalTakers.toLocaleString() : "—"}
+            sub={totalsSub}
+          />
+          <StatCard
+            variant="summary"
+            label="Total Passers"
+            valueTone="pass"
+            value={totalPassers > 0 ? totalPassers.toLocaleString() : "—"}
+            sub={totalsSub}
+          />
+          <StatCard
+            variant="summary"
+            label="Total Failed"
+            valueTone="fail"
+            value={totalFailed > 0 ? totalFailed.toLocaleString() : "—"}
+            sub={totalsSub}
+          />
+        </div>
       </div>
 
       {latest?.source_url && (
@@ -111,74 +254,45 @@ export default async function ExamPage({
           <a href={latest.source_url} target="_blank" rel="noopener noreferrer">
             {latest.source_url.replace(/^https?:\/\//, "")}
           </a>
-          {" · "}Ingested via automated scraper from publicly available PRC result posts.
+          {" · "}Ingested from publicly available PRC result posts.
         </p>
       )}
 
-      {trendData.length > 1 && (
-        <section>
-          <SectionTitle>
-            National passing rate trend ({trendData[0]?.label}–{trendData[trendData.length - 1]?.label})
-          </SectionTitle>
-          <Card>
-            <LineTrend data={trendData} />
-          </Card>
-        </section>
-      )}
+      <ExamHistoryPanel
+        historyTitle={historyTitle}
+        exportQuery={`type=exam_history&exam_code=${program.examCode}&years=10`}
+        rows={enriched}
+        incompleteNote={coverage.incompleteNote}
+        trendData={trendData}
+        volumeData={volumeData}
+        combinedData={combinedData}
+        trendLabel={difficulty?.trend ?? null}
+      />
 
-      <section>
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <SectionTitle>
-            Top performing schools{topSchoolYear ? ` — ${topSchoolYear}` : ""}
-          </SectionTitle>
-          {topSchoolYear && (
-            <Link
-              href={`/rankings?exam_code=${program.examCode}&year=${topSchoolYear}`}
-              className="text-xs text-brand hover:underline"
-            >
-              View all schools (~250+) →
-            </Link>
-          )}
-        </div>
-        {topSchools.length === 0 ? (
-          <Card>No school-level data yet for this exam.</Card>
-        ) : (
+      {topnotcherData.topnotchers.length > 0 && topnotcherData.cycle && (
+        <section>
+          <SectionTitle>Top 10 — {topnotcherData.cycle.label}</SectionTitle>
           <Card className="overflow-x-auto p-0">
             <table className="data-table w-full text-sm">
               <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
                 <tr>
-                  <th className="p-3">#</th>
+                  <th className="p-3">Rank</th>
+                  <th className="p-3">Name</th>
                   <th className="p-3">School</th>
-                  <th className="p-3 text-right">Examinees</th>
-                  <th className="p-3 text-right">Passers</th>
-                  <th className="p-3 text-right">Pass Rate</th>
+                  <th className="p-3 text-right">Rating</th>
                 </tr>
               </thead>
               <tbody>
-                {topSchools.map((s) => (
-                  <tr key={`${s.school_id}-${s.year}`} className="border-b border-ink-line/80">
-                    <td className="p-3 text-slate-500">{s.rank}</td>
-                    <td className="p-3">
-                      <SchoolLink id={s.school_id} name={s.school} />
-                    </td>
-                    <td className="p-3 text-right">{s.takers ?? "—"}</td>
-                    <td className="p-3 text-right">{s.passers ?? "—"}</td>
-                    <td className="p-3 text-right">
-                      <PassRate value={s.pass_rate} />
-                    </td>
+                {topnotcherData.topnotchers.map((t) => (
+                  <tr key={t.rank} className="border-b border-ink-line/80">
+                    <td className="p-3 text-slate-500">{t.rank}</td>
+                    <td className="p-3 font-medium text-slate-900">{t.name ?? "—"}</td>
+                    <td className="p-3 text-slate-700">{t.school ?? "—"}</td>
+                    <td className="p-3 text-right tabular-nums">{t.rating ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </Card>
-        )}
-      </section>
-
-      {distribution.some((d) => d.count > 0) && (
-        <section>
-          <SectionTitle>School pass-rate distribution</SectionTitle>
-          <Card>
-            <BarDistribution data={distribution} />
           </Card>
         </section>
       )}

@@ -181,6 +181,20 @@ def list_exam_cycles(exam_code: str, start_year: int, end_year: int) -> list[dic
     return res.data or []
 
 
+def list_placeholder_cycles(
+    exam_codes: list[str],
+    start_year: int,
+    end_year: int,
+) -> list[dict]:
+    """exam_results shells (total_takers=0) within a year range."""
+    rows: list[dict] = []
+    for code in exam_codes:
+        for row in list_exam_cycles(code, start_year, end_year):
+            if (row.get("total_takers") or 0) <= 0:
+                rows.append({**row, "exam_code": code})
+    return rows
+
+
 def missing_cycles(
     exam_code: str,
     start_year: int,

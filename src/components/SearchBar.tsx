@@ -19,7 +19,7 @@ export function SearchBar({ initial = "" }: { initial?: string }) {
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search schools or exams…"
+        placeholder="Search exams…"
         className="field-input w-full px-4 py-3"
         aria-label="Search"
       />

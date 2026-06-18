@@ -14,22 +14,15 @@ import {
 import { crowdedCycleXAxis } from "./chartAxis";
 import { AREA_DOT, AREA_STROKE, blueAreaGradientDef } from "./chartFill";
 
-export interface TrendPoint {
+export interface VolumePoint {
   label: string;
   fullLabel?: string;
-  school?: number | null;
-  national?: number | null;
+  takers: number | null;
 }
 
-export function LineTrend({
-  data,
-  showNational = true,
-}: {
-  data: TrendPoint[];
-  showNational?: boolean;
-}) {
-  const hasSchool = data.some((d) => d.school != null);
-  const hasNational = showNational && data.some((d) => d.national != null);
+export function VolumeTrend({ data }: { data: VolumePoint[] }) {
+  const values = data.map((d) => d.takers).filter((x): x is number => x != null);
+  const max = values.length ? Math.max(...values) : 100;
   const xAxis = crowdedCycleXAxis(data.length);
   const gradId = useId().replace(/:/g, "");
 
@@ -55,14 +48,14 @@ export function LineTrend({
           stroke="#475569"
           fontSize={12}
           tick={{ fill: "#475569" }}
-          domain={[0, 100]}
-          unit="%"
-          width={44}
+          domain={[0, Math.ceil(max * 1.1)]}
+          width={48}
+          tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
         />
         <Tooltip
           labelFormatter={(_, payload) =>
-            (payload?.[0]?.payload as TrendPoint | undefined)?.fullLabel ??
-            (payload?.[0]?.payload as TrendPoint | undefined)?.label ??
+            (payload?.[0]?.payload as VolumePoint | undefined)?.fullLabel ??
+            (payload?.[0]?.payload as VolumePoint | undefined)?.label ??
             ""
           }
           contentStyle={{
@@ -71,36 +64,23 @@ export function LineTrend({
             borderRadius: 8,
             color: "#0f172a",
           }}
+          formatter={(value) => [
+            typeof value === "number" ? value.toLocaleString() : "—",
+            "Examinees",
+          ]}
         />
-        {(hasSchool || hasNational) && (
-          <Legend wrapperStyle={{ fontSize: 12, color: "#334155" }} />
-        )}
-        {hasSchool && (
-          <Area
-            type="monotone"
-            dataKey="school"
-            name="School"
-            stroke="#1d4ed8"
-            fill="#1d4ed822"
-            strokeWidth={2.5}
-            dot={AREA_DOT}
-            activeDot={{ r: 4 }}
-            connectNulls
-          />
-        )}
-        {hasNational && (
-          <Area
-            type="monotone"
-            dataKey="national"
-            name="National"
-            stroke={AREA_STROKE}
-            fill={`url(#${gradId})`}
-            strokeWidth={2.5}
-            dot={AREA_DOT}
-            activeDot={{ r: 4 }}
-            connectNulls
-          />
-        )}
+        <Legend wrapperStyle={{ fontSize: 12, color: "#334155" }} />
+        <Area
+          type="monotone"
+          dataKey="takers"
+          name="Examinees"
+          stroke={AREA_STROKE}
+          fill={`url(#${gradId})`}
+          strokeWidth={2.5}
+          dot={AREA_DOT}
+          activeDot={{ r: 4 }}
+          connectNulls
+        />
       </AreaChart>
     </ResponsiveContainer>
   );

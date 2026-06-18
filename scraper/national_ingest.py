@@ -24,6 +24,7 @@ from national_extract import extract_stats_from_url, get_date
 from national_validate import (
     exam_inference_score,
     infer_exam_from_content,
+    is_placeholder_row,
     should_overwrite,
     validate_row,
 )
@@ -79,13 +80,14 @@ def ingest_row(row: dict, *, dry_run: bool = False) -> tuple[str, str]:
         return "saved", f"dry-run {stats['total_passers']}/{stats['total_takers']} {month} {row['year']}"
 
     existing = db.get_exam_result(row["exam_code"], month, row["year"])
-    if existing and not should_overwrite(
-        existing.get("source_url"),
-        source,
-        existing,
-        stats,
-    ):
-        return "skipped", "existing official row (no overwrite)"
+    if existing and not is_placeholder_row(existing):
+        if not should_overwrite(
+            existing.get("source_url"),
+            source,
+            existing,
+            stats,
+        ):
+            return "skipped", "existing official row (no overwrite)"
 
     eid = db.upsert_exam_result(row["exam_code"], month, row["year"], stats, url)
     db.audit("import", "exam_results", eid, {

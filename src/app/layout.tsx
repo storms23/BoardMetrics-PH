@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: "%s · Pasa Rate PH",
   },
   description:
-    "Search, compare, and analyze PRC licensure examination results by school, exam, and year.",
+    "Track national PRC licensure exam pass rates — search by exam, compare programs, and explore year-over-year trends.",
 };
 
 export default function RootLayout({
@@ -35,9 +35,7 @@ export default function RootLayout({
               <nav className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
                 <Link href="/search">Search</Link>
                 <Link href="/exams">Exams</Link>
-                <Link href="/rankings">Rankings</Link>
-                <Link href="/leaderboard">Leaderboard</Link>
-                <Link href="/compare">Compare</Link>
+                <Link href="/compare">Compare exams</Link>
                 <Link href="/api-docs">API</Link>
               </nav>
             </div>

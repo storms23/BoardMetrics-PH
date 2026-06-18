@@ -19,9 +19,9 @@ export function HeaderSearch() {
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search schools…"
+        placeholder="Search exams…"
         className="field-input w-44 py-1.5 text-sm lg:w-56"
-        aria-label="Search schools"
+        aria-label="Search exams"
       />
       <button
         type="submit"

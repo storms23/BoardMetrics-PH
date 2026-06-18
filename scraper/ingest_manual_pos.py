@@ -3,8 +3,10 @@
 Ingest Performance of Schools PDFs from a local folder (manual Drive export).
 
 Usage:
-  python ingest_manual_pos.py CELE scraper/input/cele_pos --dry-run
-  python ingest_manual_pos.py CELE scraper/input/cele_pos
+  python ingest_manual_pos.py CELE input/cele_pos --dry-run
+  python ingest_manual_pos.py CELE input/cele_pos --text-only
+  python ingest_manual_pos.py CELE input/cele_pos --scanned-only --gemini --dry-run
+  python ingest_manual_pos.py CELE input/cele_pos --scanned-only --gemini
 """
 
 from __future__ import annotations
@@ -25,6 +27,17 @@ from national_validate import validate_stats
 from normalize import infer_region
 from prc_gov_ph import parse_prc_pos_pdf, parse_prc_pos_text
 from programs import resolve_exam_code
+
+try:
+    from pos_gemini_extract import check_gemini_available, extract_schools_gemini_pdf
+except ImportError:
+    extract_schools_gemini_pdf = None  # type: ignore[misc, assignment]
+    check_gemini_available = None  # type: ignore[misc, assignment]
+
+try:
+    from pos_vision_extract import extract_schools_vision_pdf
+except ImportError:
+    extract_schools_vision_pdf = None  # type: ignore[misc, assignment]
 
 OCR_SPACE_KEY = os.getenv("OCR_SPACE_API_KEY", "K87217505288957")
 OCR_PAUSE = 1.5
@@ -135,7 +148,12 @@ def _parse_school_table_from_text(text: str) -> list[dict]:
     return schools
 
 
-def extract_schools_from_pdf(pdf_bytes: bytes) -> tuple[list[dict], str]:
+def extract_schools_from_pdf(
+    pdf_bytes: bytes,
+    *,
+    use_vision: bool = False,
+    vision_backend: str = "gemini",
+) -> tuple[list[dict], str]:
     """Return (schools, parser_label)."""
     _ensure_ocr_key()
     schools = parse_prc_pos_pdf(pdf_bytes)
@@ -143,7 +161,39 @@ def extract_schools_from_pdf(pdf_bytes: bytes) -> tuple[list[dict], str]:
         return schools, "parse_prc_pos_pdf"
 
     if _pdf_has_text_layer(pdf_bytes):
-        return schools, "parse_prc_pos_pdf_partial"
+        if not use_vision:
+            return schools, "parse_prc_pos_pdf_partial"
+
+    if use_vision:
+        if vision_backend == "gemini" and extract_schools_gemini_pdf is not None:
+            try:
+                vision_schools, meta = extract_schools_gemini_pdf(pdf_bytes, verbose=True)
+                if vision_schools:
+                    label = f"gemini_vision_{meta.get('pages_with_rows', 0)}p"
+                    return vision_schools, label
+                return [], "gemini_vision_empty"
+            except RuntimeError as exc:
+                print(f"  Gemini vision skipped: {exc}")
+                return [], "gemini_vision_no_key"
+            except Exception as exc:
+                print(f"  Gemini vision error: {exc}")
+                return [], "gemini_vision_error"
+
+        if vision_backend == "anthropic" and extract_schools_vision_pdf is not None:
+            try:
+                vision_schools, meta = extract_schools_vision_pdf(pdf_bytes, verbose=True)
+                if vision_schools:
+                    label = f"claude_vision_{meta.get('pages_with_rows', 0)}p"
+                    return vision_schools, label
+                return [], "claude_vision_empty"
+            except RuntimeError as exc:
+                print(f"  Claude vision skipped: {exc}")
+                return [], "claude_vision_no_key"
+            except Exception as exc:
+                print(f"  Claude vision error: {exc}")
+                return [], "claude_vision_error"
+
+        return [], f"{vision_backend}_vision_unavailable"
 
     try:
         import pdfplumber
@@ -230,6 +280,8 @@ def ingest_pdf(
     path: Path,
     *,
     dry_run: bool,
+    use_vision: bool = False,
+    vision_backend: str = "gemini",
 ) -> dict:
     parsed = parse_filename(path)
     if not parsed:
@@ -241,10 +293,14 @@ def ingest_pdf(
 
     month, year = parsed
     pdf_bytes = path.read_bytes()
-    schools, parser_used = extract_schools_from_pdf(pdf_bytes)
+    schools, parser_used = extract_schools_from_pdf(
+        pdf_bytes,
+        use_vision=use_vision,
+        vision_backend=vision_backend,
+    )
 
     schools, school_warnings = filter_schools(schools)
-    stats = extract_summary_from_pdf_bytes(pdf_bytes)
+    stats = None if use_vision else extract_summary_from_pdf_bytes(pdf_bytes)
     stats_ok = False
     stats_detail = ""
     if stats:
@@ -347,30 +403,53 @@ def _is_text_pdf(path: Path) -> bool:
     return _pdf_has_text_layer(path.read_bytes())
 
 
+def _is_scanned_pdf(path: Path) -> bool:
+    """True when the PDF lacks a usable text layer (image scan)."""
+    return not _pdf_has_text_layer(path.read_bytes())
+
+
 def run_folder(
     exam_code: str,
     folder: Path,
     *,
     dry_run: bool,
     text_only: bool,
+    scanned_only: bool,
+    use_vision: bool,
+    vision_backend: str,
     report_path: Path,
 ) -> dict:
     pdfs = sorted(folder.glob("*.pdf"))
     if text_only:
         pdfs = [p for p in pdfs if _is_text_pdf(p)]
+    elif scanned_only:
+        pdfs = [p for p in pdfs if _is_scanned_pdf(p)]
     if not pdfs:
-        print(f"No PDFs in {folder}" + (" (text-only filter)" if text_only else ""))
+        filters = []
+        if text_only:
+            filters.append("text-only")
+        if scanned_only:
+            filters.append("scanned-only")
+        print(f"No PDFs in {folder}" + (f" ({', '.join(filters)})" if filters else ""))
         sys.exit(1)
 
     print(f"\nIngest {exam_code} from {folder} ({len(pdfs)} PDFs)"
           f"{' [dry-run]' if dry_run else ''}"
-          f"{' [text-only]' if text_only else ''}\n")
+          f"{' [text-only]' if text_only else ''}"
+          f"{' [scanned-only]' if scanned_only else ''}"
+          f"{' [vision:' + vision_backend + ']' if use_vision else ''}\n")
 
     results: list[dict] = []
     counts = {"saved": 0, "dry-run": 0, "failed": 0, "partial": 0, "skipped": 0}
 
     for path in pdfs:
-        r = ingest_pdf(exam_code, path, dry_run=dry_run)
+        r = ingest_pdf(
+            exam_code,
+            path,
+            dry_run=dry_run,
+            use_vision=use_vision,
+            vision_backend=vision_backend,
+        )
         results.append(r)
         status = r.get("status", "failed")
         counts[status] = counts.get(status, 0) + 1
@@ -403,11 +482,51 @@ def main() -> None:
         help="Skip scanned/image PDFs; ingest only files with a text layer",
     )
     parser.add_argument(
+        "--scanned-only",
+        action="store_true",
+        help="Ingest only scanned PDFs (no text layer)",
+    )
+    parser.add_argument(
+        "--gemini",
+        action="store_true",
+        help="Use Gemini Vision per page for scanned PDFs (requires GEMINI_API_KEY)",
+    )
+    parser.add_argument(
+        "--vision",
+        action="store_true",
+        help="Alias for --gemini (Claude: add --vision-backend anthropic)",
+    )
+    parser.add_argument(
+        "--vision-backend",
+        choices=("gemini", "anthropic"),
+        default="gemini",
+        help="Vision provider when --gemini or --vision is set (default: gemini)",
+    )
+    parser.add_argument(
         "--report",
         type=Path,
         default=Path("output/cele_manual_ingest_report.json"),
     )
     args = parser.parse_args()
+
+    use_vision = args.gemini or args.vision
+    vision_backend = args.vision_backend
+
+    if args.text_only and args.scanned_only:
+        print("Choose --text-only or --scanned-only, not both")
+        sys.exit(1)
+    if use_vision and vision_backend == "gemini" and not os.getenv("GEMINI_API_KEY"):
+        print("GEMINI_API_KEY required for Gemini vision")
+        sys.exit(1)
+    if use_vision and vision_backend == "gemini" and check_gemini_available is not None:
+        try:
+            check_gemini_available()
+        except RuntimeError as exc:
+            print(f"Gemini unavailable: {exc}")
+            sys.exit(1)
+    if use_vision and vision_backend == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY required for --vision-backend anthropic")
+        sys.exit(1)
 
     if not args.dry_run and (not db.SUPABASE_URL or not db.SERVICE_KEY):
         print("SUPABASE env not configured")
@@ -426,6 +545,9 @@ def main() -> None:
         args.folder,
         dry_run=args.dry_run,
         text_only=args.text_only,
+        scanned_only=args.scanned_only,
+        use_vision=use_vision,
+        vision_backend=vision_backend,
         report_path=args.report,
     )
 

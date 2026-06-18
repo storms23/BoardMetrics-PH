@@ -1,157 +1,171 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useRef } from "react";
+import {
+  Card,
+  PassRate,
+  SectionTitle,
+  StatCard,
+  TrendLabelBadge,
+} from "@/components/ui";
+import type { CompareExamResult } from "@/lib/queries";
+import { PROGRAMS } from "@/lib/programs";
 
-interface CompareEntry {
-  school_id: number;
-  summary: {
-    avg_pass_rate: number | null;
-    consistency_score: number | null;
-    consistency_label: string;
-    times_above_national: number;
-    best_pass_rate: number | null;
-    worst_pass_rate: number | null;
-    exams_participated: number;
-  };
-  history: any[];
+function shortName(name: string): string {
+  return name.replace(" Licensure Examination", "");
 }
 
-const METRICS: { key: string; label: string; fmt?: (v: any) => string }[] = [
-  { key: "avg_pass_rate", label: "Avg Pass Rate", fmt: (v) => (v != null ? `${v}%` : "—") },
-  { key: "best_pass_rate", label: "Best Pass Rate", fmt: (v) => (v != null ? `${v}%` : "—") },
-  { key: "worst_pass_rate", label: "Worst Pass Rate", fmt: (v) => (v != null ? `${v}%` : "—") },
-  { key: "consistency_score", label: "Consistency Score", fmt: (v) => (v != null ? `${v}/100` : "—") },
-  { key: "consistency_label", label: "Consistency Rating" },
-  { key: "times_above_national", label: "Times Above National", fmt: (v) => `${v}x` },
-  { key: "exams_participated", label: "Exams Tracked" },
-];
+export function ExamCompareTool({
+  initialCodes,
+  exams,
+}: {
+  initialCodes: string[];
+  exams: CompareExamResult[];
+}) {
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const slots = [
+    initialCodes[0] ?? "",
+    initialCodes[1] ?? "",
+    initialCodes[2] ?? "",
+  ];
 
-export function CompareTool({ initialIds }: { initialIds: number[] }) {
-  const [ids, setIds] = useState<number[]>(initialIds);
-  const [data, setData] = useState<Record<string, CompareEntry>>({});
-  const [term, setTerm] = useState("");
-  const [results, setResults] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    if (ids.length === 0) {
-      setData({});
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/v1/compare?school_ids=${ids.join(",")}`);
-      setData(res.ok ? await res.json() : {});
-    } catch {
-      setData({});
-    } finally {
-      setLoading(false);
-    }
-  }, [ids]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function search(q: string) {
-    setTerm(q);
-    if (q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/v1/search?q=${encodeURIComponent(q)}`);
-      const json = res.ok ? await res.json() : { schools: [] };
-      setResults(json.schools ?? []);
-    } catch {
-      setResults([]);
-    }
+  function onSelectChange() {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
+    const picked = [0, 1, 2]
+      .map((i) => String(fd.get(`slot_${i}`) ?? "").trim())
+      .filter(Boolean);
+    const unique = [...new Set(picked)];
+    const qs = unique.length ? `?codes=${unique.join(",")}` : "";
+    router.push(`/compare${qs}`);
   }
-
-  function addSchool(id: number) {
-    if (!ids.includes(id)) setIds([...ids, id]);
-    setTerm("");
-    setResults([]);
-  }
-
-  function removeSchool(id: number) {
-    setIds(ids.filter((x) => x !== id));
-  }
-
-  const names = Object.keys(data);
 
   return (
     <div className="space-y-6">
-      <div className="relative max-w-md">
-        <input
-          value={term}
-          onChange={(e) => search(e.target.value)}
-          placeholder="Add a school to compare…"
-          className="field-input w-full px-4 py-3"
-        />
-        {results.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full rounded-lg border border-ink-line bg-white shadow-lg">
-            {results.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => addSchool(s.id)}
-                className="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+      <Card>
+        <form ref={formRef} className="grid gap-3 sm:grid-cols-3">
+          {slots.map((code, i) => (
+            <label key={i} className="text-xs text-slate-500">
+              Exam {i + 1}
+              <select
+                name={`slot_${i}`}
+                defaultValue={code}
+                onChange={onSelectChange}
+                className="field-input mt-1 w-full"
               >
-                {s.name}
-                {s.regions?.name && (
-                  <span className="ml-2 text-xs text-slate-500">{s.regions.name}</span>
+                <option value="">— Select —</option>
+                {PROGRAMS.map((p) => (
+                  <option key={p.examCode} value={p.examCode}>
+                    {shortName(p.name)} ({p.examCode})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </form>
+      </Card>
+
+      {exams.length === 0 ? (
+        <Card className="text-center text-slate-600">
+          Select two or three examinations above to compare national pass rates.
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-6 lg:grid-cols-3">
+            {exams.map((exam) => (
+              <div key={exam.exam_code} className="space-y-3">
+                <div>
+                  <Link
+                    href={`/exams/${exam.slug}`}
+                    className="font-semibold text-slate-900 hover:text-brand"
+                  >
+                    {shortName(exam.name)}
+                  </Link>
+                  <div className="font-mono text-xs text-slate-500">{exam.exam_code}</div>
+                </div>
+                {exam.latest_rate == null && exam.avg_10yr == null ? (
+                  <Card className="text-sm text-amber-800">
+                    No national stats yet for this program.
+                  </Card>
+                ) : (
+                  <>
+                <div className="grid grid-cols-2 gap-2">
+                  <StatCard
+                    label="Latest rate"
+                    value={
+                      exam.latest_rate != null ? (
+                        <PassRate value={exam.latest_rate} />
+                      ) : (
+                        "—"
+                      )
+                    }
+                    sub={exam.latest_cycle ?? undefined}
+                  />
+                  <StatCard
+                    label="10-year avg"
+                    value={exam.avg_10yr != null ? `${exam.avg_10yr}%` : "—"}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Trend</span>
+                  <TrendLabelBadge label={exam.trend} />
+                </div>
+                  </>
                 )}
-              </button>
+              </div>
             ))}
           </div>
-        )}
-      </div>
 
-      {loading && <div className="text-sm text-slate-500">Loading…</div>}
-
-      {names.length === 0 ? (
-        <div className="rounded-xl border border-ink-line bg-ink-soft p-5 text-slate-600 shadow-sm">
-          Search and add schools to compare them side-by-side.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-line bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-line bg-slate-50 text-left">
-              <tr>
-                <th className="p-3 text-slate-500">Metric</th>
-                {names.map((name) => (
-                  <th key={name} className="p-3 text-slate-900">
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{name}</span>
-                      <button
-                        onClick={() => removeSchool(data[name].school_id)}
-                        className="text-xs text-rose-600 hover:text-rose-700"
-                        aria-label={`Remove ${name}`}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {METRICS.map((m) => (
-                <tr key={m.key} className="border-b border-ink-line/80 hover:bg-slate-50">
-                  <td className="p-3 text-slate-500">{m.label}</td>
-                  {names.map((name) => {
-                    const v = (data[name].summary as any)[m.key];
-                    return (
-                      <td key={name} className="p-3 text-slate-700">
-                        {m.fmt ? m.fmt(v) : String(v ?? "—")}
-                      </td>
-                    );
-                  })}
-                </tr>
+          <section>
+            <SectionTitle>Latest 3 cycles</SectionTitle>
+            <div className="grid gap-4 lg:grid-cols-3">
+              {exams.map((exam) => (
+                <Card key={exam.exam_code} className="overflow-x-auto p-0">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-ink-line bg-slate-50 text-left">
+                      <tr>
+                        <th className="p-2 text-xs text-slate-500" colSpan={2}>
+                          {shortName(exam.name)}
+                        </th>
+                      </tr>
+                      <tr>
+                        <th className="p-2 text-xs font-medium text-slate-500">Cycle</th>
+                        <th className="p-2 text-right text-xs font-medium text-slate-500">
+                          Rate
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exam.recent_cycles.length === 0 ? (
+                        <tr>
+                          <td colSpan={2} className="p-2 text-slate-500">
+                            No data
+                          </td>
+                        </tr>
+                      ) : (
+                        exam.recent_cycles.map((c) => (
+                          <tr
+                            key={c.label}
+                            className="border-b border-ink-line/80 hover:bg-slate-50"
+                          >
+                            <td className="p-2 text-slate-700">{c.label}</td>
+                            <td className="p-2 text-right tabular-nums">
+                              <PassRate value={c.rate} />
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </Card>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </section>
+        </>
       )}
     </div>
   );

@@ -24,7 +24,7 @@ const ENDPOINTS: Endpoint[] = [
   { method: "GET", path: "/api/v1/analytics/trend", desc: "School trend (line-chart data).", example: "/api/v1/analytics/trend?school_id=1&exam_code=NLE" },
   { method: "GET", path: "/api/v1/analytics/difficulty", desc: "Exam difficulty over time.", example: "/api/v1/analytics/difficulty?exam_code=NLE" },
   { method: "GET", path: "/api/v1/analytics/distribution", desc: "Pass-rate distribution bands.", example: "/api/v1/analytics/distribution?exam_code=NLE" },
-  { method: "GET", path: "/api/v1/export", desc: "Export CSV/Excel (rankings, exam_top, regions, exams).", example: "/api/v1/export?type=rankings&exam_code=NLE&format=csv" },
+  { method: "GET", path: "/api/v1/export", desc: "Export CSV/Excel (rankings, exam_top, exam_history, regions, exams).", example: "/api/v1/export?type=exam_history&exam_code=NLE&years=10&format=csv" },
 ];
 
 export default function ApiDocsPage() {
@@ -35,7 +35,9 @@ export default function ApiDocsPage() {
         <p className="mt-1 text-sm text-slate-600">
           REST endpoints under <code className="text-brand">/api/v1</code>. JSON responses,
           pagination, filtering, sorting, and rate limiting. Machine-readable spec at{" "}
-          <a href="/api/v1/openapi.json">/api/v1/openapi.json</a>.
+          <a href="/api/v1/openapi.json">/api/v1/openapi.json</a>. For bulk national data,
+          <code className="text-brand"> /api/v1/export?type=exam_history</code> is the primary
+          export for the MVP.
         </p>
       </div>
 

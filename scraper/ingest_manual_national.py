@@ -3,6 +3,7 @@
 Ingest national pass-rate rows from a CSV file (manual / user-provided).
 
 CSV columns: exam_code, month, year, total_passers, total_takers, pass_rate
+Optional: source_url (defaults to manual://user-csv-national)
 
 Usage:
   python ingest_manual_national.py input/cele_national.csv
@@ -62,7 +63,13 @@ def ingest(path: Path, *, dry_run: bool) -> None:
             saved += 1
             continue
 
-        eid = db.upsert_exam_result(exam_code, month, year, stats, SOURCE_TAG)
+        eid = db.upsert_exam_result(
+            exam_code,
+            month,
+            year,
+            stats,
+            (raw.get("source_url") or "").strip() or SOURCE_TAG,
+        )
         db.audit("import", "exam_results", eid, {
             "exam_code": exam_code,
             "month": month,
