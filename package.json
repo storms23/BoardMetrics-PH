@@ -1,8 +1,8 @@
 {
-  "name": "pasa-rate-ph",
+  "name": "board-analytics-ph",
   "version": "1.0.0",
   "private": true,
-  "description": "Pasa Rate PH - PRC board exam results, searchable and analyzable.",
+  "description": "Board Analytics PH - PRC board exam results, searchable and analyzable.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

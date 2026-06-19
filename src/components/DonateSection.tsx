@@ -1,0 +1,41 @@
+import Image from "next/image";
+import donateQr from "@/app/image/donate-qr.png";
+import { SITE_NAME } from "@/lib/site";
+import { Card } from "@/components/ui";
+
+export function DonateSection({ embedded = false }: { embedded?: boolean }) {
+  const inner = (
+    <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
+      <div className="max-w-lg space-y-2">
+        {!embedded && (
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+            Support the creator
+          </h2>
+        )}
+        <p className="text-sm leading-relaxed text-slate-600">
+          {SITE_NAME} is built and maintained independently. If this site helped your board exam
+          research or review, you can send a tip via InstaPay by scanning the QR code.
+        </p>
+        <p className="text-xs text-slate-500">Donations are optional and deeply appreciated.</p>
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-2 self-center sm:self-auto">
+        <Image
+          src={donateQr}
+          alt="InstaPay donation QR code"
+          className="h-48 w-48 rounded-xl border border-ink-line bg-white p-2 shadow-sm"
+        />
+        <p className="text-xs font-medium text-slate-600">Scan to donate · InstaPay</p>
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return <Card>{inner}</Card>;
+  }
+
+  return (
+    <section className="border-t border-ink-line bg-slate-50/60">
+      <div className="mx-auto max-w-6xl px-4 py-8">{inner}</div>
+    </section>
+  );
+}

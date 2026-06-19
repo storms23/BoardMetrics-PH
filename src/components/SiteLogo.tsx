@@ -7,7 +7,7 @@ export function SiteLogo({ size = "md" }: { size?: "sm" | "md" }) {
   return (
     <Image
       src={logoImage}
-      alt="Pasa Rate PH"
+      alt="Board Analytics PH"
       height={height}
       width={height}
       className="h-[42px] w-auto object-contain sm:h-[47px]"

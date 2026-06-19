@@ -5,7 +5,7 @@ export function GET() {
   const spec = {
     openapi: "3.0.3",
     info: {
-      title: "Pasa Rate PH API",
+      title: "Board Analytics PH API",
       version: "1.0.0",
       description:
         "Public REST API for PRC board-exam results: schools, exams, rankings, topnotchers, search, and analytics. Rate-limited per IP; pass X-API-Key for the partner tier.",
