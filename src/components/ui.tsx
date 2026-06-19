@@ -336,14 +336,12 @@ export function TableScroll({
 }) {
   return (
     <div>
-      <p className="flex items-center justify-center gap-2 border-b border-ink-line bg-slate-50 px-3 py-2 text-center text-xs text-slate-500 sm:hidden">
+      <p className="flex items-center justify-center gap-2 border-b border-ink-line bg-slate-100 px-3 py-2 text-center text-xs text-slate-500 sm:hidden">
         <span aria-hidden="true">←</span>
         {hint}
         <span aria-hidden="true">→</span>
       </p>
-      <div className="table-scroll-fade">
-        <div className="table-scroll overflow-x-auto">{children}</div>
-      </div>
+      <div className="table-scroll">{children}</div>
     </div>
   );
 }
