@@ -1,9 +1,14 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { SiteLogo } from "@/components/SiteLogo";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -26,9 +31,12 @@ export default function RootLayout({
         <header className="border-b border-ink-line bg-white shadow-sm">
           <div className="mx-auto max-w-6xl px-4 py-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Link href="/" className="flex items-center gap-2 text-slate-900 no-underline">
+              <Link
+                href="/"
+                className="flex shrink-0 items-center gap-2 text-slate-900 no-underline"
+              >
                 <SiteLogo />
-                <span className="text-lg font-extrabold tracking-tight leading-tight">
+                <span className="text-lg font-extrabold leading-tight tracking-tight">
                   Board Analytics{" "}
                   <span className="text-brand">PH</span>
                 </span>
@@ -36,11 +44,15 @@ export default function RootLayout({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
                 <HeaderSearch />
                 <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                  <Link href="/exams">Exams</Link>
-                  <Link href="/compare">Compare exams</Link>
+                  <Link href="/exams" className="whitespace-nowrap">
+                    Exams
+                  </Link>
+                  <Link href="/compare" className="whitespace-nowrap">
+                    Compare exams
+                  </Link>
                   <Link
                     href="/support"
-                    className="no-underline-link rounded-lg border border-brand bg-brand/5 px-3 py-1.5 font-semibold text-brand hover:bg-brand hover:text-white"
+                    className="no-underline-link whitespace-nowrap rounded-lg border border-brand bg-brand/5 px-3 py-1.5 font-semibold text-brand hover:bg-brand hover:text-white"
                   >
                     Support creator
                   </Link>

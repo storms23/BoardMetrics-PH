@@ -7,7 +7,7 @@ export default function SupportPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-900">Support the creator</h1>
+        <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Support the creator</h1>
         <p className="mt-1 text-sm text-slate-600">
           Help keep Board Analytics PH free and maintained for board exam researchers and
           students.

@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { crowdedCycleXAxis } from "./chartAxis";
+import { ChartFrame } from "./ChartFrame";
 import { AREA_DOT, AREA_STROKE, blueAreaGradientDef } from "./chartFill";
 
 export interface RateVolumePoint {
@@ -29,7 +30,8 @@ export function RateVolumeTrend({ data }: { data: RateVolumePoint[] }) {
   const maxTakers = takerValues.length ? Math.max(...takerValues) : 100;
 
   return (
-    <ResponsiveContainer width="100%" height={360}>
+    <ChartFrame>
+      <ResponsiveContainer width="100%" height="100%">
       <ComposedChart
         data={data}
         margin={{ top: 12, right: 12, bottom: xAxis.marginBottom, left: 4 }}
@@ -118,5 +120,6 @@ export function RateVolumeTrend({ data }: { data: RateVolumePoint[] }) {
         />
       </ComposedChart>
     </ResponsiveContainer>
+    </ChartFrame>
   );
 }

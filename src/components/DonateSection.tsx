@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 export function DonateSection({ embedded = false }: { embedded?: boolean }) {
   const inner = (
     <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
-      <div className="max-w-lg space-y-2">
+      <div className="min-w-0 flex-1 space-y-2">
         {!embedded && (
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
             Support the creator
@@ -23,7 +23,7 @@ export function DonateSection({ embedded = false }: { embedded?: boolean }) {
           <Image
             src={donateQr}
             alt="InstaPay donation QR code"
-            className="h-48 w-48 bg-white object-contain"
+            className="h-44 w-44 max-w-full bg-white object-contain sm:h-48 sm:w-48"
             unoptimized
           />
         </div>

@@ -1,4 +1,4 @@
-import { Card, DeltaPts, EmptyState, FailedRate, PassRate, RateColumnHeader } from "@/components/ui";
+import { Card, DeltaPts, EmptyState, FailedRate, PassRate, RateColumnHeader, TableScroll } from "@/components/ui";
 import { failedCount, failedRate, type EnrichedExamCycle } from "@/lib/exam-tracker";
 
 function passRateExtremes(rows: EnrichedExamCycle[]): {
@@ -54,21 +54,22 @@ export function ExamHistoryTable({
 
   return (
     <div className="space-y-2">
-      <Card className="overflow-x-auto p-0">
+      <Card className="overflow-hidden p-0">
+        <TableScroll>
         <table className="data-table w-full text-sm">
           <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
             <tr>
-              <th className="p-3">Cycle</th>
-              <th className="p-3 text-right">Examinees</th>
-              <th className="p-3 text-right">Passers</th>
-              <th className="p-3 text-right">Failed</th>
-              <th className="p-3 text-right">
+              <th>Cycle</th>
+              <th className="text-right">Examinees</th>
+              <th className="text-right">Passers</th>
+              <th className="text-right">Failed</th>
+              <th className="text-right">
                 <RateColumnHeader kind="fail">Failed rate</RateColumnHeader>
               </th>
-              <th className="p-3 text-right">
+              <th className="text-right">
                 <RateColumnHeader kind="pass">Pass rate</RateColumnHeader>
               </th>
-              <th className="p-3 text-right">Change</th>
+              <th className="text-right">Change</th>
             </tr>
           </thead>
           <tbody>
@@ -81,33 +82,33 @@ export function ExamHistoryTable({
                   row.isComplete ? highlight : "bg-slate-50/80 opacity-70"
                 }`}
               >
-                <td className="p-3 font-medium text-slate-900">{row.cycleLabel}</td>
-                <td className="p-3 text-right tabular-nums">
+                <td className="font-medium text-slate-900">{row.cycleLabel}</td>
+                <td className="text-right tabular-nums">
                   {row.total_takers != null && row.total_takers > 0
                     ? row.total_takers.toLocaleString()
                     : "—"}
                 </td>
-                <td className="p-3 text-right tabular-nums">
+                <td className="text-right tabular-nums">
                   {row.total_passers != null ? row.total_passers.toLocaleString() : "—"}
                 </td>
-                <td className="p-3 text-right tabular-nums">
+                <td className="text-right tabular-nums">
                   {row.isComplete ? (failedCount(row)?.toLocaleString() ?? "—") : "—"}
                 </td>
-                <td className="p-3 text-right tabular-nums">
+                <td className="text-right tabular-nums">
                   {row.isComplete ? (
                     <FailedRate value={failedRate(row)} variant="gradient" />
                   ) : (
                     <span className="text-slate-500">—</span>
                   )}
                 </td>
-                <td className="p-3 text-right">
+                <td className="text-right">
                   {row.isComplete ? (
                     <PassRate value={row.pass_rate} variant="gradient" />
                   ) : (
                     <span className="text-slate-500">—</span>
                   )}
                 </td>
-                <td className="p-3 text-right">
+                <td className="text-right">
                   {row.isComplete ? (
                     <DeltaPts value={row.deltaPts} />
                   ) : (
@@ -119,6 +120,7 @@ export function ExamHistoryTable({
             })}
           </tbody>
         </table>
+        </TableScroll>
       </Card>
       {hasRange && (
         <p className="text-xs text-slate-500">

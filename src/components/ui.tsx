@@ -167,7 +167,7 @@ export function TrackerScope({
   windowYears: number;
 }) {
   return (
-    <div className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-brand/25 bg-brand/5 px-3 py-2">
+    <div className="inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-brand/25 bg-brand/5 px-3 py-2">
       <span className="text-sm font-bold tabular-nums tracking-tight text-slate-900">
         {cycleCount} cycle{cycleCount === 1 ? "" : "s"} · {yearFrom}–{yearTo}
       </span>
@@ -323,6 +323,28 @@ export function SectionTitle({ children }: { children: React.ReactNode }) {
     <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-600">
       {children}
     </h2>
+  );
+}
+
+/** Horizontal scroll wrapper for wide tables — hint + edge fade on mobile only. */
+export function TableScroll({
+  children,
+  hint = "Swipe sideways to see all columns",
+}: {
+  children: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <p className="flex items-center justify-center gap-2 border-b border-ink-line bg-slate-50 px-3 py-2 text-center text-xs text-slate-500 sm:hidden">
+        <span aria-hidden="true">←</span>
+        {hint}
+        <span aria-hidden="true">→</span>
+      </p>
+      <div className="table-scroll-fade">
+        <div className="table-scroll overflow-x-auto">{children}</div>
+      </div>
+    </div>
   );
 }
 

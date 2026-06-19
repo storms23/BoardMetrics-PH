@@ -42,9 +42,9 @@ export default async function HomePage() {
   return (
     <div className="space-y-12">
       <section className="space-y-5 py-8 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+        <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
           PRC board exam results,
-          <br />
+          <br className="hidden sm:inline" />
           <span className="text-brand-dark">searchable and analyzable.</span>
         </h1>
         <p className="mx-auto max-w-2xl text-slate-600">

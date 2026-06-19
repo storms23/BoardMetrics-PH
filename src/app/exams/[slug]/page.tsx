@@ -5,6 +5,7 @@ import {
   NotConnected,
   SectionTitle,
   StatCard,
+  TableScroll,
   TrackerScope,
 } from "@/components/ui";
 import {
@@ -253,7 +254,7 @@ export default async function ExamPage({
       </div>
 
       {latest?.source_url && (
-        <p className="text-xs text-slate-600">
+        <p className="break-all text-xs text-slate-600">
           Latest cycle source:{" "}
           <a href={latest.source_url} target="_blank" rel="noopener noreferrer">
             {latest.source_url.replace(/^https?:\/\//, "")}
@@ -276,27 +277,29 @@ export default async function ExamPage({
       {topnotcherData.topnotchers.length > 0 && topnotcherData.cycle && (
         <section>
           <SectionTitle>Top 10 — {topnotcherData.cycle.label}</SectionTitle>
-          <Card className="overflow-x-auto p-0">
+          <Card className="overflow-hidden p-0">
+            <TableScroll>
             <table className="data-table w-full text-sm">
               <thead className="border-b border-ink-line bg-slate-100 text-left text-slate-700">
                 <tr>
-                  <th className="p-3">Rank</th>
-                  <th className="p-3">Name</th>
-                  <th className="p-3">School</th>
-                  <th className="p-3 text-right">Rating</th>
+                  <th>Rank</th>
+                  <th>Name</th>
+                  <th>School</th>
+                  <th className="text-right">Rating</th>
                 </tr>
               </thead>
               <tbody>
                 {topnotcherData.topnotchers.map((t) => (
                   <tr key={t.rank} className="border-b border-ink-line/80">
-                    <td className="p-3 text-slate-500">{t.rank}</td>
-                    <td className="p-3 font-medium text-slate-900">{t.name ?? "—"}</td>
-                    <td className="p-3 text-slate-700">{t.school ?? "—"}</td>
-                    <td className="p-3 text-right tabular-nums">{t.rating ?? "—"}</td>
+                    <td className="text-slate-500">{t.rank}</td>
+                    <td className="font-medium text-slate-900">{t.name ?? "—"}</td>
+                    <td className="text-slate-700">{t.school ?? "—"}</td>
+                    <td className="text-right tabular-nums">{t.rating ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </TableScroll>
           </Card>
         </section>
       )}

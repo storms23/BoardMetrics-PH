@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, DataStatusBadge } from "@/components/ui";
+import { Card } from "@/components/ui";
 import {
   PROGRAMS,
   PROGRAM_CATEGORY_LABELS,
@@ -99,12 +99,6 @@ export function ExamProgramGrid({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {visible.map((p) => {
           const s = stats[p.examCode];
-          const status =
-            !s || s.complete_cycles === 0
-              ? "none"
-              : s.complete_cycles < s.total_cycles
-                ? "partial"
-                : "ok";
 
           return (
             <Link key={p.examCode} href={`/exams/${p.slug}`}>
@@ -112,10 +106,7 @@ export function ExamProgramGrid({
                 <div className="flex gap-3">
                   <ProgramIcon iconKey={p.iconKey} category={p.category} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="font-semibold text-slate-900">{shortName(p.name)}</div>
-                      <DataStatusBadge status={status} />
-                    </div>
+                    <div className="font-semibold text-slate-900">{shortName(p.name)}</div>
                     <div className="mt-1 font-mono text-xs text-slate-500">{p.examCode}</div>
                     <div className="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">
                       {PROGRAM_CATEGORY_LABELS[p.category]}

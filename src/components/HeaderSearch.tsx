@@ -20,7 +20,7 @@ export function HeaderSearch() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search exams…"
-        className="field-input min-w-0 flex-1 py-1.5 text-sm sm:w-40 lg:w-52"
+        className="field-input min-w-0 flex-1 py-1.5 text-sm sm:w-40 sm:flex-none lg:w-52"
         aria-label="Search exams"
       />
       <button

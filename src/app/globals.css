@@ -14,10 +14,15 @@
   color-scheme: light;
 }
 
+html {
+  overflow-x: clip;
+}
+
 body {
   background-color: var(--color-ink);
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 /* Content links only — avoid overriding nav/button styles */
@@ -55,11 +60,59 @@ header a.no-underline-link:hover {
     @apply rounded-lg border border-ink-line bg-white px-3 py-2 text-slate-900 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
   }
 
+  .data-table {
+    @apply w-full sm:min-w-0;
+  }
+
+  @media (max-width: 639px) {
+    .data-table {
+      min-width: 42rem;
+    }
+  }
+
+  .data-table th,
+  .data-table td {
+    @apply p-3 text-sm;
+  }
+
+  @media (max-width: 639px) {
+    .data-table th,
+    .data-table td {
+      @apply p-2 text-xs;
+    }
+  }
+
   .data-table tbody tr:hover {
     @apply bg-slate-100;
   }
 
   .data-table tbody tr:hover a {
     color: var(--color-brand-dark);
+  }
+
+  .table-scroll {
+    @apply -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-scroll-fade {
+    @apply relative;
+  }
+
+  .table-scroll-fade::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1.75rem;
+    background: linear-gradient(to left, var(--color-ink-soft), transparent);
+    pointer-events: none;
+  }
+
+  @media (min-width: 640px) {
+    .table-scroll-fade::after {
+      display: none;
+    }
   }
 }

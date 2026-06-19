@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { crowdedCycleXAxis } from "./chartAxis";
+import { ChartFrame } from "./ChartFrame";
 import { AREA_DOT, AREA_STROKE, blueAreaGradientDef } from "./chartFill";
 
 export interface TrendPoint {
@@ -34,7 +35,8 @@ export function LineTrend({
   const gradId = useId().replace(/:/g, "");
 
   return (
-    <ResponsiveContainer width="100%" height={360}>
+    <ChartFrame>
+      <ResponsiveContainer width="100%" height="100%">
       <AreaChart
         data={data}
         margin={{ top: 12, right: 20, bottom: xAxis.marginBottom, left: 4 }}
@@ -103,5 +105,6 @@ export function LineTrend({
         )}
       </AreaChart>
     </ResponsiveContainer>
+    </ChartFrame>
   );
 }

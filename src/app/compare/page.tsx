@@ -27,7 +27,7 @@ export default async function ComparePage({
     } catch {
       return (
         <div className="space-y-6">
-          <h1 className="text-2xl font-extrabold text-slate-900">Compare examinations</h1>
+          <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Compare examinations</h1>
           <NotConnected />
         </div>
       );
@@ -37,7 +37,7 @@ export default async function ComparePage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-900">Compare examinations</h1>
+        <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Compare examinations</h1>
         <p className="mt-1 text-sm text-slate-600">
           Side-by-side national pass rates across {PROGRAMS.length} board exams — last 10 years.
         </p>

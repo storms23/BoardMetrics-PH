@@ -1,4 +1,4 @@
-import { Card, SectionTitle, EmptyState } from "@/components/ui";
+import { Card, SectionTitle, EmptyState, TableScroll } from "@/components/ui";
 import { isAdmin } from "@/lib/adminAuth";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import {
@@ -86,8 +86,8 @@ export default async function AdminPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Admin console</h1>
         <form action={logout}>
           <button className="rounded-lg border border-ink-line px-3 py-1.5 text-sm text-slate-600 hover:border-brand">
             Sign out
@@ -107,24 +107,25 @@ export default async function AdminPage() {
         {feedback.length === 0 ? (
           <Card>No feedback yet.</Card>
         ) : (
-          <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
+          <Card className="overflow-hidden p-0">
+            <TableScroll>
+            <table className="data-table w-full text-sm">
               <thead className="border-b border-ink-line text-left text-slate-400">
                 <tr>
-                  <th className="p-3 whitespace-nowrap">When</th>
-                  <th className="p-3">Name</th>
-                  <th className="p-3">Email</th>
-                  <th className="p-3 min-w-[16rem]">Message</th>
+                  <th className="whitespace-nowrap">When</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th className="min-w-[16rem]">Message</th>
                 </tr>
               </thead>
               <tbody>
                 {feedback.map((f) => (
                   <tr key={f.id} className="border-b border-ink-line/50 align-top">
-                    <td className="p-3 whitespace-nowrap text-slate-400">
+                    <td className="whitespace-nowrap text-slate-400">
                       {new Date(f.created_at).toLocaleString()}
                     </td>
-                    <td className="p-3 whitespace-nowrap">{f.name ?? "—"}</td>
-                    <td className="p-3">
+                    <td className="whitespace-nowrap">{f.name ?? "—"}</td>
+                    <td className="max-w-[9rem] break-all sm:max-w-none">
                       {f.email ? (
                         <a href={`mailto:${f.email}`} className="text-brand hover:underline">
                           {f.email}
@@ -133,13 +134,14 @@ export default async function AdminPage() {
                         "—"
                       )}
                     </td>
-                    <td className="p-3 max-w-xl whitespace-pre-wrap break-words text-slate-700">
+                    <td className="max-w-xl whitespace-pre-wrap break-words text-slate-700">
                       {f.message}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </TableScroll>
           </Card>
         )}
       </section>
@@ -164,8 +166,8 @@ export default async function AdminPage() {
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                     c.count === 0
-                      ? "bg-emerald-500/15 text-emerald-300"
-                      : "bg-rose-500/15 text-rose-300"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-rose-100 text-rose-800"
                   }`}
                 >
                   {c.count}
@@ -182,31 +184,33 @@ export default async function AdminPage() {
         {jobs.length === 0 ? (
           <Card>No import jobs yet.</Card>
         ) : (
-          <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
+          <Card className="overflow-hidden p-0">
+            <TableScroll>
+            <table className="data-table w-full text-sm">
               <thead className="border-b border-ink-line text-left text-slate-400">
                 <tr>
-                  <th className="p-3">Program</th>
-                  <th className="p-3">Year</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3 text-right">Rows</th>
-                  <th className="p-3">Started</th>
+                  <th>Program</th>
+                  <th>Year</th>
+                  <th>Status</th>
+                  <th className="text-right">Rows</th>
+                  <th>Started</th>
                 </tr>
               </thead>
               <tbody>
                 {jobs.map((j) => (
                   <tr key={j.id} className="border-b border-ink-line/50">
-                    <td className="p-3">{j.programs?.exam_code ?? "—"}</td>
-                    <td className="p-3">{j.year}</td>
-                    <td className="p-3">{j.status}</td>
-                    <td className="p-3 text-right">{j.rows_affected}</td>
-                    <td className="p-3 text-slate-400">
+                    <td>{j.programs?.exam_code ?? "—"}</td>
+                    <td>{j.year}</td>
+                    <td>{j.status}</td>
+                    <td className="text-right">{j.rows_affected}</td>
+                    <td className="text-slate-400">
                       {new Date(j.started_at).toLocaleString()}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </TableScroll>
           </Card>
         )}
       </section>
@@ -216,25 +220,26 @@ export default async function AdminPage() {
         {logs.length === 0 ? (
           <Card>No audit entries yet.</Card>
         ) : (
-          <Card className="overflow-x-auto p-0">
-            <table className="w-full text-sm">
+          <Card className="overflow-hidden p-0">
+            <TableScroll>
+            <table className="data-table w-full text-sm">
               <thead className="border-b border-ink-line text-left text-slate-400">
                 <tr>
-                  <th className="p-3">When</th>
-                  <th className="p-3">Actor</th>
-                  <th className="p-3">Action</th>
-                  <th className="p-3">Entity</th>
+                  <th>When</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Entity</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((l) => (
                   <tr key={l.id} className="border-b border-ink-line/50">
-                    <td className="p-3 text-slate-400">
+                    <td className="text-slate-400">
                       {new Date(l.created_at).toLocaleString()}
                     </td>
-                    <td className="p-3">{l.actor ?? "—"}</td>
-                    <td className="p-3">{l.action}</td>
-                    <td className="p-3">
+                    <td>{l.actor ?? "—"}</td>
+                    <td>{l.action}</td>
+                    <td>
                       {l.entity}
                       {l.entity_id ? ` #${l.entity_id}` : ""}
                     </td>
@@ -242,6 +247,7 @@ export default async function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </TableScroll>
           </Card>
         )}
       </section>

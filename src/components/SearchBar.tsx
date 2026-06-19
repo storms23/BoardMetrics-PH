@@ -15,17 +15,17 @@ export function SearchBar({ initial = "" }: { initial?: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="flex gap-2">
+    <form onSubmit={submit} className="flex min-w-0 gap-2">
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search exams…"
-        className="field-input w-full px-4 py-3"
+        className="field-input min-w-0 flex-1 px-3 py-2.5 sm:px-4 sm:py-3"
         aria-label="Search"
       />
       <button
         type="submit"
-        className="rounded-lg bg-brand px-5 py-3 font-semibold text-white hover:bg-brand-dark"
+        className="shrink-0 rounded-lg bg-brand px-4 py-2.5 font-semibold text-white hover:bg-brand-dark sm:px-5 sm:py-3"
       >
         Search
       </button>
