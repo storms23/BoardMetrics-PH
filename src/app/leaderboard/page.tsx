@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Card } from "@/components/ui";
+import { Card, ButtonLink } from "@/components/ui";
 
 export const metadata = { title: "Leaderboard" };
 
@@ -13,18 +12,12 @@ export default function LeaderboardPage() {
           explore pass-rate history, difficulty trends, and program comparisons.
         </p>
         <div className="flex flex-wrap gap-3 text-sm">
-          <Link
-            href="/exams"
-            className="rounded-lg bg-brand px-4 py-2 font-semibold text-white no-underline hover:bg-brand-dark"
-          >
+          <ButtonLink href="/exams" className="px-4 py-2">
             Browse exams
-          </Link>
-          <Link
-            href="/compare"
-            className="rounded-lg border border-ink-line bg-white px-4 py-2 font-semibold text-slate-900 no-underline hover:border-brand"
-          >
+          </ButtonLink>
+          <ButtonLink href="/compare" variant="secondary" className="px-4 py-2">
             Compare exams
-          </Link>
+          </ButtonLink>
         </div>
       </Card>
     </div>

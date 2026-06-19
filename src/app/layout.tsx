@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HeaderSearch } from "@/components/HeaderSearch";
+import { SiteLogo } from "@/components/SiteLogo";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,23 +22,21 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <header className="border-b border-ink-line bg-white shadow-sm">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <Link href="/" className="flex items-center gap-2 text-slate-900 no-underline">
-              <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-sm font-bold text-white">
-                PR
-              </span>
-              <span className="text-lg font-extrabold tracking-tight">
-                Pasa Rate <span className="text-brand">PH</span>
-              </span>
-            </Link>
-            <div className="flex flex-wrap items-center gap-4">
-              <HeaderSearch />
-              <nav className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-                <Link href="/search">Search</Link>
-                <Link href="/exams">Exams</Link>
-                <Link href="/compare">Compare exams</Link>
-                <Link href="/api-docs">API</Link>
-              </nav>
+          <div className="mx-auto max-w-6xl px-4 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Link href="/" className="flex items-center gap-2 text-slate-900 no-underline">
+                <SiteLogo />
+                <span className="text-lg font-extrabold tracking-tight">
+                  Pasa Rate <span className="text-brand">PH</span>
+                </span>
+              </Link>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                <HeaderSearch />
+                <nav className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+                  <Link href="/exams">Exams</Link>
+                  <Link href="/compare">Compare exams</Link>
+                </nav>
+              </div>
             </div>
           </div>
         </header>

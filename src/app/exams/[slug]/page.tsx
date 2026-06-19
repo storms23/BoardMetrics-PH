@@ -2,9 +2,7 @@ import { ExamHistoryPanel } from "@/components/ExamHistoryPanel";
 import {
   Card,
   CoverageBadge,
-  FailedRate,
   NotConnected,
-  PassRate,
   SectionTitle,
   StatCard,
   TrackerScope,
@@ -14,7 +12,6 @@ import {
   compareExamCycles,
   computeCoverage,
   enrichCycles,
-  failedRate,
   filterTrackerWindow,
   formatCycleLabel,
   isCompleteNationalRow,
@@ -138,10 +135,9 @@ export default async function ExamPage({
   const highestPass = [...complete]
     .filter((row) => row.pass_rate != null)
     .sort((a, b) => (b.pass_rate ?? 0) - (a.pass_rate ?? 0))[0];
-  const highestFailed = [...complete]
-    .map((row) => ({ row, rate: failedRate(row) }))
-    .filter((x): x is { row: (typeof complete)[number]; rate: number } => x.rate != null)
-    .sort((a, b) => b.rate - a.rate)[0];
+  const lowestPass = [...complete]
+    .filter((row) => row.pass_rate != null)
+    .sort((a, b) => (a.pass_rate ?? 0) - (b.pass_rate ?? 0))[0];
   const scopeLabel =
     coverage.yearFrom != null && coverage.yearTo != null
       ? `${coverage.yearFrom}–${coverage.yearTo}`
@@ -191,14 +187,20 @@ export default async function ExamPage({
             variant="hero"
             tone="highlight"
             label="Latest Pass Rate"
-            value={latest?.pass_rate != null ? <PassRate value={latest.pass_rate} /> : "—"}
+            value={
+              latest?.pass_rate != null ? `${latest.pass_rate.toFixed(2)}%` : "—"
+            }
             sub={latest ? formatCycleLabel(latest.month, latest.year) : undefined}
           />
           <StatCard
             variant="hero"
             tone="pass"
             label="Highest Pass Rate"
-            value={highestPass?.pass_rate != null ? <PassRate value={highestPass.pass_rate} /> : "—"}
+            value={
+              highestPass?.pass_rate != null
+                ? `${highestPass.pass_rate.toFixed(2)}%`
+                : "—"
+            }
             sub={
               highestPass
                 ? `${formatCycleLabel(highestPass.month, highestPass.year)} · ${scopeLabel}`
@@ -208,11 +210,13 @@ export default async function ExamPage({
           <StatCard
             variant="hero"
             tone="fail"
-            label="Highest Failed Rate"
-            value={highestFailed ? <FailedRate value={highestFailed.rate} /> : "—"}
+            label="Lowest Pass Rate"
+            value={
+              lowestPass?.pass_rate != null ? `${lowestPass.pass_rate.toFixed(2)}%` : "—"
+            }
             sub={
-              highestFailed
-                ? `${formatCycleLabel(highestFailed.row.month, highestFailed.row.year)} · ${scopeLabel}`
+              lowestPass
+                ? `${formatCycleLabel(lowestPass.month, lowestPass.year)} · ${scopeLabel}`
                 : undefined
             }
           />

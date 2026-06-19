@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Card, PassRate, SectionTitle } from "@/components/ui";
-import { PROGRAMS } from "@/lib/programs";
+import { Card, PassRate, SectionTitle, ButtonLink } from "@/components/ui";
+import { PROGRAMS, getProgramByCode } from "@/lib/programs";
 import { listExams } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
-import { SearchBar } from "@/components/SearchBar";
+import { ProgramBrowseGrid } from "@/components/ProgramBrowseGrid";
+import { ProgramIcon } from "@/components/ProgramIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -50,12 +51,9 @@ export default async function HomePage() {
           National pass-rate history, trends, and comparisons across{" "}
           {PROGRAMS.length} licensure programs — by exam and year.
         </p>
-        <div className="mx-auto max-w-xl">
-          <SearchBar />
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <ButtonLink href="/exams">Browse all exams</ButtonLink>
         </div>
-        <p className="text-xs text-slate-500">
-          Try: “Nursing 2025” · “Civil Engineering” · “CPALE”
-        </p>
       </section>
 
       {connected && (hardest.length > 0 || easiest.length > 0) && (
@@ -73,19 +71,29 @@ export default async function HomePage() {
             {hardest.length > 0 && (
               <div>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Hardest (lowest avg)
+                  Lowest average pass rate
                 </h3>
                 <div className="grid gap-2">
-                  {hardest.map((e) => (
-                    <Link key={e.exam_code} href={`/exams/${e.slug}`}>
-                      <Card className="flex items-center justify-between gap-3 transition-colors hover:border-brand">
-                        <span className="text-sm font-medium text-slate-900">
-                          {shortName(e.exam_fullname)}
-                        </span>
-                        <PassRate value={e.avg_national_pass_rate} />
-                      </Card>
-                    </Link>
-                  ))}
+                  {hardest.map((e) => {
+                    const program = getProgramByCode(e.exam_code);
+                    return (
+                      <Link key={e.exam_code} href={`/exams/${e.slug}`}>
+                        <Card className="flex items-center gap-3 transition-colors hover:border-brand">
+                          {program && (
+                            <ProgramIcon
+                              iconKey={program.iconKey}
+                              category={program.category}
+                              size="sm"
+                            />
+                          )}
+                          <span className="min-w-0 flex-1 text-sm font-medium text-slate-900">
+                            {shortName(e.exam_fullname)}
+                          </span>
+                          <PassRate value={e.avg_national_pass_rate} />
+                        </Card>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -95,16 +103,26 @@ export default async function HomePage() {
                   Highest avg pass rates
                 </h3>
                 <div className="grid gap-2">
-                  {easiest.map((e) => (
-                    <Link key={e.exam_code} href={`/exams/${e.slug}`}>
-                      <Card className="flex items-center justify-between gap-3 transition-colors hover:border-brand">
-                        <span className="text-sm font-medium text-slate-900">
-                          {shortName(e.exam_fullname)}
-                        </span>
-                        <PassRate value={e.avg_national_pass_rate} />
-                      </Card>
-                    </Link>
-                  ))}
+                  {easiest.map((e) => {
+                    const program = getProgramByCode(e.exam_code);
+                    return (
+                      <Link key={e.exam_code} href={`/exams/${e.slug}`}>
+                        <Card className="flex items-center gap-3 transition-colors hover:border-brand">
+                          {program && (
+                            <ProgramIcon
+                              iconKey={program.iconKey}
+                              category={program.category}
+                              size="sm"
+                            />
+                          )}
+                          <span className="min-w-0 flex-1 text-sm font-medium text-slate-900">
+                            {shortName(e.exam_fullname)}
+                          </span>
+                          <PassRate value={e.avg_national_pass_rate} />
+                        </Card>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -112,27 +130,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      <section>
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">
-          Browse by examination
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {PROGRAMS.map((p) => (
-            <Link
-              key={p.examCode}
-              href={`/exams/${p.slug}`}
-              className="rounded-xl border border-ink-line bg-ink-soft p-4 shadow-sm transition-colors hover:border-brand"
-            >
-              <div className="text-sm font-semibold text-slate-900">
-                {p.name.replace(" Licensure Examination", "")}
-              </div>
-              <div className="mt-1 font-mono text-xs text-slate-500">
-                {p.examCode}
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <ProgramBrowseGrid />
     </div>
   );
 }

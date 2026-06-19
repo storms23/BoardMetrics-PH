@@ -1,6 +1,38 @@
 import { Card, DeltaPts, EmptyState, FailedRate, PassRate, RateColumnHeader } from "@/components/ui";
 import { failedCount, failedRate, type EnrichedExamCycle } from "@/lib/exam-tracker";
 
+function passRateExtremes(rows: EnrichedExamCycle[]): {
+  highest: number | null;
+  lowest: number | null;
+} {
+  const rates = rows
+    .filter((r) => r.isComplete && r.pass_rate != null)
+    .map((r) => r.pass_rate as number);
+  if (rates.length === 0) return { highest: null, lowest: null };
+  return { highest: Math.max(...rates), lowest: Math.min(...rates) };
+}
+
+function rowHighlightClass(
+  row: EnrichedExamCycle,
+  highest: number | null,
+  lowest: number | null,
+): string {
+  if (!row.isComplete || row.pass_rate == null || highest == null || lowest == null) {
+    return "";
+  }
+  const rate = row.pass_rate;
+  if (highest !== lowest && rate === highest) {
+    return "bg-emerald-50/80";
+  }
+  if (highest !== lowest && rate === lowest) {
+    return "bg-rose-50/80";
+  }
+  if (highest === lowest && rate === highest) {
+    return "bg-emerald-50/80";
+  }
+  return "";
+}
+
 export function ExamHistoryTable({
   rows,
   incompleteNote,
@@ -16,6 +48,9 @@ export function ExamHistoryTable({
       />
     );
   }
+
+  const { highest, lowest } = passRateExtremes(rows);
+  const hasRange = highest != null && lowest != null && highest !== lowest;
 
   return (
     <div className="space-y-2">
@@ -37,10 +72,14 @@ export function ExamHistoryTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const highlight = rowHighlightClass(row, highest, lowest);
+              return (
               <tr
                 key={row.id}
-                className={`border-b border-ink-line/80 ${row.isComplete ? "" : "bg-slate-50/80 opacity-70"}`}
+                className={`border-b border-ink-line/80 ${
+                  row.isComplete ? highlight : "bg-slate-50/80 opacity-70"
+                }`}
               >
                 <td className="p-3 font-medium text-slate-900">{row.cycleLabel}</td>
                 <td className="p-3 text-right tabular-nums">
@@ -56,14 +95,14 @@ export function ExamHistoryTable({
                 </td>
                 <td className="p-3 text-right tabular-nums">
                   {row.isComplete ? (
-                    <FailedRate value={failedRate(row)} />
+                    <FailedRate value={failedRate(row)} variant="gradient" />
                   ) : (
                     <span className="text-slate-500">—</span>
                   )}
                 </td>
                 <td className="p-3 text-right">
                   {row.isComplete ? (
-                    <PassRate value={row.pass_rate} />
+                    <PassRate value={row.pass_rate} variant="gradient" />
                   ) : (
                     <span className="text-slate-500">—</span>
                   )}
@@ -76,10 +115,18 @@ export function ExamHistoryTable({
                   )}
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </Card>
+      {hasRange && (
+        <p className="text-xs text-slate-500">
+          <span className="inline-block rounded bg-emerald-50/80 px-1.5 py-0.5">Green</span> = highest pass
+          rate ·{" "}
+          <span className="inline-block rounded bg-rose-50/80 px-1.5 py-0.5">Red</span> = lowest pass rate
+        </p>
+      )}
       {incompleteNote && (
         <p className="text-xs text-slate-500">{incompleteNote}</p>
       )}

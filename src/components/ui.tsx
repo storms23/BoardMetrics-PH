@@ -33,7 +33,7 @@ function StatValue({
           ? "text-rose-700"
           : valueTone === "highlight"
             ? "text-amber-700"
-            : "text-slate-950";
+            : "text-slate-900";
     return <span className={color}>{value}</span>;
   }
   return <>{value}</>;
@@ -97,7 +97,7 @@ export function StatCard({
 
   return (
     <Card className={`flex flex-col text-center ${pad} ${toneClass} ${minH}`}>
-      <div className={`font-medium uppercase tracking-wider text-slate-600 ${labelClass}`}>
+      <div className={`font-bold uppercase tracking-wider text-slate-700 ${labelClass}`}>
         {label}
       </div>
       <div
@@ -215,18 +215,62 @@ export function DeltaPts({ value }: { value: number | null }) {
   );
 }
 
-export function PassRate({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-slate-500">—</span>;
-  const color =
-    value >= 90 ? "text-emerald-700" : value >= 70 ? "text-sky-700" : "text-amber-700";
-  return <span className={`font-semibold ${color}`}>{value.toFixed(2)}%</span>;
+/** Pass rate gradient — national results table only (readable greens, ~20% spread). */
+export function passRateGradientClass(value: number): string {
+  if (value >= 75) return "text-emerald-700";
+  if (value >= 50) return "text-emerald-600";
+  return "text-emerald-500";
 }
 
-export function FailedRate({ value }: { value: number | null }) {
+/** Failed rate gradient — national results table only (readable reds, ~20% spread). */
+export function failedRateGradientClass(value: number): string {
+  if (value >= 50) return "text-rose-700";
+  if (value >= 25) return "text-rose-600";
+  return "text-rose-500";
+}
+
+export function PassRate({
+  value,
+  variant = "default",
+}: {
+  value: number | null;
+  /** Use `gradient` only in the national results table. */
+  variant?: "default" | "gradient";
+}) {
   if (value == null) return <span className="text-slate-500">—</span>;
   const color =
-    value <= 10 ? "text-emerald-700" : value <= 30 ? "text-amber-700" : "text-rose-700";
-  return <span className={`font-semibold ${color}`}>{value.toFixed(2)}%</span>;
+    variant === "gradient"
+      ? passRateGradientClass(value)
+      : value >= 90
+        ? "text-emerald-700"
+        : value >= 70
+          ? "text-sky-700"
+          : "text-amber-700";
+  return (
+    <span className={`font-semibold tabular-nums ${color}`}>{value.toFixed(2)}%</span>
+  );
+}
+
+export function FailedRate({
+  value,
+  variant = "default",
+}: {
+  value: number | null;
+  /** Use `gradient` only in the national results table. */
+  variant?: "default" | "gradient";
+}) {
+  if (value == null) return <span className="text-slate-500">—</span>;
+  const color =
+    variant === "gradient"
+      ? failedRateGradientClass(value)
+      : value <= 10
+        ? "text-emerald-700"
+        : value <= 30
+          ? "text-amber-700"
+          : "text-rose-700";
+  return (
+    <span className={`font-semibold tabular-nums ${color}`}>{value.toFixed(2)}%</span>
+  );
 }
 
 /** Colored pill for rate column headers in national results tables */
@@ -295,6 +339,31 @@ export function SchoolLink({
       className="no-underline-link font-medium text-brand hover:text-brand-dark"
     >
       {name}
+    </Link>
+  );
+}
+
+export function ButtonLink({
+  href,
+  variant = "primary",
+  className = "",
+  children,
+}: {
+  href: string;
+  variant?: "primary" | "secondary";
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const base =
+    "inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold no-underline-link";
+  const variantClass =
+    variant === "primary"
+      ? "bg-brand text-white hover:bg-brand-dark"
+      : "border border-ink-line bg-white text-slate-700 hover:border-brand";
+
+  return (
+    <Link href={href} className={`${base} ${variantClass} ${className}`.trim()}>
+      {children}
     </Link>
   );
 }

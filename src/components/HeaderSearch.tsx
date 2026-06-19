@@ -15,17 +15,17 @@ export function HeaderSearch() {
   }
 
   return (
-    <form onSubmit={submit} className="hidden items-center gap-2 sm:flex">
+    <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search exams…"
-        className="field-input w-44 py-1.5 text-sm lg:w-56"
+        className="field-input min-w-0 flex-1 py-1.5 text-sm sm:w-40 lg:w-52"
         aria-label="Search exams"
       />
       <button
         type="submit"
-        className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-dark"
+        className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-dark"
       >
         Search
       </button>

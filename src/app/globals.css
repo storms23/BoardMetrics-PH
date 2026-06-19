@@ -31,6 +31,10 @@ main a:not(.no-underline-link):hover {
   text-decoration: underline;
 }
 
+main a.no-underline-link:hover {
+  text-decoration: none;
+}
+
 header a {
   color: #475569;
   font-weight: 500;
