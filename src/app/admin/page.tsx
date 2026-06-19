@@ -1,7 +1,13 @@
 import { Card, SectionTitle, EmptyState } from "@/components/ui";
 import { isAdmin } from "@/lib/adminAuth";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
-import { listImportJobs, listAuditLogs, runVerification } from "@/lib/admin";
+import {
+  listImportJobs,
+  listAuditLogs,
+  listCreatorFeedback,
+  runVerification,
+  type CreatorFeedbackRow,
+} from "@/lib/admin";
 import { login, logout } from "./actions";
 
 export const metadata = { title: "Admin Console" };
@@ -49,18 +55,20 @@ export default async function AdminPage() {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-extrabold text-slate-900">Admin console</h1>
-        <EmptyState title="Connect Supabase to view import jobs, audit logs, and verification." />
+        <EmptyState title="Connect Supabase to view creator feedback, import jobs, audit logs, and verification." />
       </div>
     );
   }
 
   let jobs: any[] = [];
   let logs: any[] = [];
+  let feedback: CreatorFeedbackRow[] = [];
   let report: Awaited<ReturnType<typeof runVerification>> | null = null;
   try {
-    [jobs, logs, report] = await Promise.all([
+    [jobs, logs, feedback, report] = await Promise.all([
       listImportJobs(),
       listAuditLogs(),
+      listCreatorFeedback(),
       runVerification(),
     ]);
   } catch (e) {
@@ -86,6 +94,55 @@ export default async function AdminPage() {
           </button>
         </form>
       </div>
+
+      <section>
+        <SectionTitle>Creator feedback</SectionTitle>
+        <Card className="mb-3 text-sm text-slate-700">
+          Messages submitted from the public{" "}
+          <a href="/support" className="text-brand hover:underline">
+            Support creator
+          </a>{" "}
+          page. Showing the latest {feedback.length} entries.
+        </Card>
+        {feedback.length === 0 ? (
+          <Card>No feedback yet.</Card>
+        ) : (
+          <Card className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-line text-left text-slate-400">
+                <tr>
+                  <th className="p-3 whitespace-nowrap">When</th>
+                  <th className="p-3">Name</th>
+                  <th className="p-3">Email</th>
+                  <th className="p-3 min-w-[16rem]">Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feedback.map((f) => (
+                  <tr key={f.id} className="border-b border-ink-line/50 align-top">
+                    <td className="p-3 whitespace-nowrap text-slate-400">
+                      {new Date(f.created_at).toLocaleString()}
+                    </td>
+                    <td className="p-3 whitespace-nowrap">{f.name ?? "—"}</td>
+                    <td className="p-3">
+                      {f.email ? (
+                        <a href={`mailto:${f.email}`} className="text-brand hover:underline">
+                          {f.email}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="p-3 max-w-xl whitespace-pre-wrap break-words text-slate-700">
+                      {f.message}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+      </section>
 
       <section>
         <SectionTitle>Data import</SectionTitle>

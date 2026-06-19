@@ -1,10 +1,11 @@
+import { CreatorFeedbackForm } from "@/components/CreatorFeedbackForm";
 import { DonateSection } from "@/components/DonateSection";
 
 export const metadata = { title: "Support the creator" };
 
 export default function SupportPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900">Support the creator</h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -13,6 +14,7 @@ export default function SupportPage() {
         </p>
       </div>
       <DonateSection embedded />
+      <CreatorFeedbackForm />
     </div>
   );
 }

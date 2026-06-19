@@ -28,6 +28,25 @@ export async function listAuditLogs(limit = 50) {
   return data ?? [];
 }
 
+export interface CreatorFeedbackRow {
+  id: number;
+  name: string | null;
+  email: string | null;
+  message: string;
+  created_at: string;
+}
+
+export async function listCreatorFeedback(limit = 100): Promise<CreatorFeedbackRow[]> {
+  const sb = getServiceClient();
+  const { data, error } = await sb
+    .from("creator_feedback")
+    .select("id, name, email, message, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as CreatorFeedbackRow[];
+}
+
 export interface VerificationReport {
   duplicates: { type: string; count: number; detail: string }[];
   missing: { type: string; count: number; detail: string }[];

@@ -19,11 +19,14 @@ export function DonateSection({ embedded = false }: { embedded?: boolean }) {
         <p className="text-xs text-slate-500">Donations are optional and deeply appreciated.</p>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-2 self-center sm:self-auto">
-        <Image
-          src={donateQr}
-          alt="InstaPay donation QR code"
-          className="h-48 w-48 rounded-xl border border-ink-line bg-white p-2 shadow-sm"
-        />
+        <div className="rounded-lg bg-white p-1">
+          <Image
+            src={donateQr}
+            alt="InstaPay donation QR code"
+            className="h-48 w-48 bg-white object-contain"
+            unoptimized
+          />
+        </div>
         <p className="text-xs font-medium text-slate-600">Scan to donate · InstaPay</p>
       </div>
     </div>
@@ -34,7 +37,7 @@ export function DonateSection({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <section className="border-t border-ink-line bg-slate-50/60">
+    <section className="border-t border-ink-line bg-white">
       <div className="mx-auto max-w-6xl px-4 py-8">{inner}</div>
     </section>
   );
