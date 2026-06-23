@@ -30,17 +30,11 @@ async function resolveExamResultIds(
   month?: string,
 ): Promise<{ programId: number; erIds: number[]; erMap: Map<number, any> } | null> {
   const sb = getServerClient();
-  // #region agent debug log
-  console.log("[PASA_DBG H-D] resolveExamResultIds called", { examCode, year, month, timestamp: Date.now() });
-  // #endregion
   const { data: prog } = await sb
     .from("programs")
     .select("id")
     .ilike("exam_code", examCode)
     .maybeSingle();
-  // #region agent debug log
-  console.log("[PASA_DBG H-D] program lookup result", { examCode, progFound: !!prog, progId: (prog as any)?.id });
-  // #endregion
   if (!prog) return null;
 
   let q = sb
@@ -50,9 +44,6 @@ async function resolveExamResultIds(
   if (year) q = q.eq("year", year);
   if (month) q = q.ilike("month", `%${month}%`);
   const { data: erRows } = await q.order("year", { ascending: false });
-  // #region agent debug log
-  console.log("[PASA_DBG H-D] exam_results lookup", { examCode, progId: (prog as any).id, erRowsCount: erRows?.length ?? 0, years: erRows?.map((r: any) => r.year) });
-  // #endregion
 
   const erIds = (erRows ?? []).map((r: any) => r.id);
   const erMap = new Map((erRows ?? []).map((r: any) => [r.id, r]));
@@ -397,14 +388,8 @@ export async function getRankings(f: RankingFilters) {
 // Ranks schools by their average pass rate across ALL available years for a
 // given board exam. This is the "10-year performance" ranking the user wants.
 export async function getAggregateRankings(f: AggregateRankingFilters) {
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] getAggregateRankings called", { filters: f, timestamp: Date.now() });
-  // #endregion
   const sb = getServerClient();
   const resolved = await resolveExamResultIds(f.examCode);
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] resolved exam_result_ids", { examCode: f.examCode, resolved: !!resolved, erIdsCount: resolved?.erIds.length ?? 0 });
-  // #endregion
   if (!resolved || !resolved.erIds.length) return [];
 
   const { data, error } = await sb
@@ -414,9 +399,6 @@ export async function getAggregateRankings(f: AggregateRankingFilters) {
     )
     .in("exam_result_id", resolved.erIds);
   if (error) throw error;
-  // #region agent debug log
-  console.log("[PASA_DBG H-B,H-C] school_performance rows fetched", { count: data?.length ?? 0, sampleSchoolIds: data?.slice(0, 3).map((r: any) => r.schools?.id) });
-  // #endregion
 
   const schoolMap = new Map<number, any>();
   for (const r of data ?? []) {
