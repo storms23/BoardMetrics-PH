@@ -16,14 +16,19 @@ import {
   filterTrackerWindow,
   formatCycleLabel,
   isCompleteNationalRow,
-  shortCycleLabel,
   sumNationalTotals,
   trackerYearRange,
   TRACKER_WINDOW_YEARS,
 } from "@/lib/exam-tracker";
+import { buildChartCycleFields } from "@/components/charts/chartData";
 import { getProgramBySlug, PROGRAMS } from "@/lib/programs";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { examDifficulty, examTopnotchersLatest, getExamCycles } from "@/lib/queries";
+import {
+  computeCombinedAnalytics,
+  computeTrendAnalytics,
+  computeVolumeAnalytics,
+} from "@/lib/trend-analytics";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -95,37 +100,25 @@ export default async function ExamPage({
       ? `${TRACKER_WINDOW_YEARS}-year sum · ${complete.length} cycle${complete.length === 1 ? "" : "s"}`
       : undefined;
 
-  const trendData = (difficulty?.data ?? []).map((d) => {
-    const fullLabel = formatCycleLabel(d.month, d.year);
-    return {
-      label: shortCycleLabel(d.month, d.year),
-      fullLabel,
-      national: d.national_pass_rate,
-    };
-  });
+  const trendData = (difficulty?.data ?? []).map((d) => ({
+    ...buildChartCycleFields(d.month, d.year),
+    national: d.national_pass_rate,
+  }));
 
   const volumeData = [...complete]
     .sort((a, b) => compareExamCycles(a, b))
-    .map((d) => {
-      const fullLabel = formatCycleLabel(d.month, d.year);
-      return {
-        label: shortCycleLabel(d.month, d.year),
-        fullLabel,
-        takers: d.total_takers,
-      };
-    });
+    .map((d) => ({
+      ...buildChartCycleFields(d.month, d.year),
+      takers: d.total_takers,
+    }));
 
   const combinedData = [...complete]
     .sort((a, b) => compareExamCycles(a, b))
-    .map((d) => {
-      const fullLabel = formatCycleLabel(d.month, d.year);
-      return {
-        label: shortCycleLabel(d.month, d.year),
-        fullLabel,
-        passRate: d.pass_rate,
-        takers: d.total_takers,
-      };
-    });
+    .map((d) => ({
+      ...buildChartCycleFields(d.month, d.year),
+      passRate: d.pass_rate,
+      takers: d.total_takers,
+    }));
 
   const historyTitle =
     coverage.yearFrom != null && coverage.yearTo != null
@@ -143,6 +136,10 @@ export default async function ExamPage({
     coverage.yearFrom != null && coverage.yearTo != null
       ? `${coverage.yearFrom}–${coverage.yearTo}`
       : `${windowRange.from}–${windowRange.to}`;
+
+  const trendAnalytics = computeTrendAnalytics(complete);
+  const volumeAnalytics = computeVolumeAnalytics(complete);
+  const combinedAnalytics = computeCombinedAnalytics(complete);
 
   return (
     <div className="space-y-8">
@@ -272,6 +269,10 @@ export default async function ExamPage({
         volumeData={volumeData}
         combinedData={combinedData}
         trendLabel={difficulty?.trend ?? null}
+        trendAnalytics={trendAnalytics}
+        volumeAnalytics={volumeAnalytics}
+        combinedAnalytics={combinedAnalytics}
+        sourceUrl={latest?.source_url ?? null}
       />
 
       {topnotcherData.topnotchers.length > 0 && topnotcherData.cycle && (

@@ -1,13 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { CombinedStatisticsPanel } from "@/components/CombinedStatisticsPanel";
 import { ExportButton } from "@/components/ExportButton";
-import { LineTrend, type TrendPoint } from "@/components/charts/LineTrend";
+import { PassRateTrendChart } from "@/components/charts/PassRateTrendChart";
 import { RateVolumeTrend, type RateVolumePoint } from "@/components/charts/RateVolumeTrend";
 import { VolumeTrend, type VolumePoint } from "@/components/charts/VolumeTrend";
+import type { TrendPoint } from "@/components/charts/LineTrend";
 import { ExamHistoryTable } from "@/components/ExamHistoryTable";
+import { TrendInsight } from "@/components/TrendInsight";
+import { TrendStatisticsPanel } from "@/components/TrendStatisticsPanel";
+import { VolumeStatisticsPanel } from "@/components/VolumeStatisticsPanel";
 import { Card, SectionTitle, TrendLabelBadge } from "@/components/ui";
 import type { EnrichedExamCycle, TrendLabel } from "@/lib/exam-tracker";
+import type {
+  CombinedAnalytics,
+  TrendAnalytics,
+  VolumeAnalytics,
+} from "@/lib/trend-analytics";
 
 type Tab = "table" | "graph";
 
@@ -20,6 +30,10 @@ export function ExamHistoryPanel({
   volumeData,
   combinedData,
   trendLabel,
+  trendAnalytics,
+  volumeAnalytics,
+  combinedAnalytics,
+  sourceUrl,
 }: {
   historyTitle: string;
   exportQuery: string;
@@ -29,10 +43,25 @@ export function ExamHistoryPanel({
   volumeData: VolumePoint[];
   combinedData: RateVolumePoint[];
   trendLabel: TrendLabel | null;
+  trendAnalytics: TrendAnalytics | null;
+  volumeAnalytics: VolumeAnalytics | null;
+  combinedAnalytics: CombinedAnalytics | null;
+  sourceUrl?: string | null;
 }) {
   const hasGraphs =
     trendData.length > 1 || volumeData.length > 1 || combinedData.length > 1;
   const [tab, setTab] = useState<Tab>("table");
+
+  const yearLabel =
+    trendAnalytics?.yearFrom != null && trendAnalytics?.yearTo != null
+      ? `${trendAnalytics.yearFrom}–${trendAnalytics.yearTo}`
+      : volumeAnalytics?.yearFrom != null && volumeAnalytics?.yearTo != null
+        ? `${volumeAnalytics.yearFrom}–${volumeAnalytics.yearTo}`
+        : "10-year window";
+
+  const sourceHint = sourceUrl
+    ? `Source: ${sourceUrl.replace(/^https?:\/\//, "")}.`
+    : null;
 
   return (
     <section>
@@ -80,47 +109,82 @@ export function ExamHistoryPanel({
       {tab === "table" || !hasGraphs ? (
         <ExamHistoryTable rows={rows} incompleteNote={incompleteNote} />
       ) : (
-        <div className="space-y-8">
-          {trendData.length > 1 && (
-            <div>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="space-y-6">
+          {trendData.length > 1 && trendAnalytics && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
                   Pass rate trend ({trendData[0]?.fullLabel}–
                   {trendData[trendData.length - 1]?.fullLabel})
                 </h3>
                 {trendLabel && <TrendLabelBadge label={trendLabel} />}
               </div>
-              <Card>
-                <LineTrend data={trendData} />
-              </Card>
+
+              <div className="grid items-start gap-4 lg:grid-cols-[1fr_17rem]">
+                <Card className="min-w-0 p-3 sm:p-4">
+                  <PassRateTrendChart
+                    data={trendData}
+                    lowest={trendAnalytics.lowest}
+                    highest={trendAnalytics.highest}
+                    latest={trendAnalytics.latest}
+                  />
+                </Card>
+                <TrendStatisticsPanel analytics={trendAnalytics} yearLabel={yearLabel} />
+              </div>
+
+              {trendAnalytics.insightText && (
+                <TrendInsight text={trendAnalytics.insightText} sourceHint={sourceHint} />
+              )}
             </div>
           )}
 
-          {volumeData.length > 1 && (
-            <div>
+          {volumeData.length > 1 && volumeAnalytics && (
+            <div className="space-y-4">
               <SectionTitle>Examinee volume over time</SectionTitle>
-              <Card>
-                <VolumeTrend data={volumeData} />
-              </Card>
+
+              <div className="grid items-start gap-4 lg:grid-cols-[1fr_17rem]">
+                <Card className="min-w-0 p-3 sm:p-4">
+                  <VolumeTrend
+                    data={volumeData}
+                    peak={volumeAnalytics.peak}
+                    lowest={volumeAnalytics.lowest}
+                  />
+                </Card>
+                <VolumeStatisticsPanel analytics={volumeAnalytics} yearLabel={yearLabel} />
+              </div>
+
+              {volumeAnalytics.insightText && (
+                <TrendInsight text={volumeAnalytics.insightText} sourceHint={sourceHint} />
+              )}
             </div>
           )}
 
-          {combinedData.length > 1 && (
-            <div>
-              <div className="mb-2 flex flex-wrap items-center gap-2">
+          {combinedData.length > 1 && combinedAnalytics && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
                 <SectionTitle>
                   Pass rate &amp; examinee volume ({combinedData[0]?.fullLabel}–
                   {combinedData[combinedData.length - 1]?.fullLabel})
                 </SectionTitle>
                 {trendLabel && <TrendLabelBadge label={trendLabel} />}
               </div>
-              <p className="mb-3 text-xs text-slate-500">
-                Blue area = pass rate (%), red line = examinees. Labels show every
-                exam cycle.
-              </p>
-              <Card>
-                <RateVolumeTrend data={combinedData} />
-              </Card>
+
+              <div className="grid items-start gap-4 lg:grid-cols-[1fr_17rem]">
+                <Card className="min-w-0 p-3 sm:p-4">
+                  <RateVolumeTrend
+                    data={combinedData}
+                    lowestRate={combinedAnalytics.lowest}
+                    highestRate={combinedAnalytics.highest}
+                    peakTakers={combinedAnalytics.peakTakers}
+                    lowestTakers={combinedAnalytics.lowestTakers}
+                  />
+                </Card>
+                <CombinedStatisticsPanel analytics={combinedAnalytics} yearLabel={yearLabel} />
+              </div>
+
+              {combinedAnalytics.insightText && (
+                <TrendInsight text={combinedAnalytics.insightText} sourceHint={sourceHint} />
+              )}
             </div>
           )}
         </div>

@@ -1,21 +1,26 @@
 import type { XAxisProps } from "recharts";
 
-/** X-axis props that stay readable when many exam cycles are plotted. */
-export function crowdedCycleXAxis(pointCount: number): Pick<
+type CrowdedAxisOptions = {
+  hasCallouts?: boolean;
+};
+
+/** X-axis props for cycle charts — two-line ticks, no rotation when width scales with data. */
+export function crowdedCycleXAxis(
+  pointCount: number,
+  options: CrowdedAxisOptions = {},
+): Pick<
   XAxisProps,
-  "angle" | "textAnchor" | "height" | "interval" | "tick" | "tickMargin"
+  "angle" | "textAnchor" | "height" | "interval" | "tickMargin"
 > & { marginBottom: number } {
-  const crowded = pointCount > 6;
-  const veryCrowded = pointCount > 12;
+  void pointCount;
+  void options;
 
   return {
-    // Always show every cycle label; rotate when dense to avoid overlap.
-    angle: crowded ? -52 : 0,
-    textAnchor: crowded ? "end" : "middle",
-    height: crowded ? (veryCrowded ? 72 : 56) : 30,
+    angle: 0,
+    textAnchor: "middle",
+    height: 42,
     interval: 0,
-    tickMargin: crowded ? 10 : 6,
-    tick: { fill: "#475569", fontSize: 11 },
-    marginBottom: crowded ? (veryCrowded ? 78 : 60) : 10,
+    tickMargin: 8,
+    marginBottom: 46,
   };
 }

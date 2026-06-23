@@ -1,10 +1,8 @@
 name: Scheduled Scrape
 
-# Runs the ETL pipeline to ingest new PRC results into Supabase, then
-# recomputes Consistency Scores. Adjust the cron as cadence requires.
+# Manual-only while national data is user-curated via scraper/input/*.csv.
+# Re-enable schedule when automated scraping is trusted again.
 on:
-  schedule:
-    - cron: "0 18 * * 0" # Sundays 18:00 UTC (02:00 Mon PHT)
   workflow_dispatch:
     inputs:
       year:

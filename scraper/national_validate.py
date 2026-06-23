@@ -29,10 +29,16 @@ _GENERIC_NAME_PARTS = frozenset({
 })
 
 SOURCE_PRIORITY = {
+    "manual://user-csv-national": 5,
+    "manual://user-csv-schools": 5,
     "prc.gov.ph": 3,
     "prcboard.com": 2,
     "prcboard.com/direct": 1,
 }
+
+
+def is_manual_source(url: str | None) -> bool:
+    return bool(url and url.startswith("manual://"))
 
 
 def _code_in_text(code: str, text: str) -> bool:
@@ -277,6 +283,8 @@ def should_overwrite(existing_url: str | None, new_source: str, existing_stats: 
     """Official prc.gov.ph rows are not overwritten by mirrors unless numbers agree."""
     if not existing_url:
         return True
+    if is_manual_source(existing_url):
+        return False
     if "prc.gov.ph" in (existing_url or "") and "prc.gov.ph" not in new_source:
         for key in ("total_takers", "total_passers", "pass_rate"):
             a = existing_stats.get(key)

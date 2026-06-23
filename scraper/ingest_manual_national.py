@@ -69,6 +69,7 @@ def ingest(path: Path, *, dry_run: bool) -> None:
             year,
             stats,
             (raw.get("source_url") or "").strip() or SOURCE_TAG,
+            force=True,
         )
         db.audit("import", "exam_results", eid, {
             "exam_code": exam_code,

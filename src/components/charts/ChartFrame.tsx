@@ -1,4 +1,20 @@
-/** Responsive chart height — shorter on phones, full height on sm+. */
-export function ChartFrame({ children }: { children: React.ReactNode }) {
-  return <div className="h-[260px] w-full min-w-0 sm:h-[360px]">{children}</div>;
+import { ChartScroll, type ChartScrollContext } from "./ChartScroll";
+
+export type { ChartScrollContext };
+
+/** Scrollable chart shell with dynamic width from data point count. */
+export function ChartFrame({
+  pointCount,
+  children,
+  rightRail,
+}: {
+  pointCount: number;
+  children: (chartWidth: number, context: ChartScrollContext) => React.ReactNode;
+  rightRail?: (context: ChartScrollContext) => React.ReactNode;
+}) {
+  return (
+    <ChartScroll pointCount={pointCount} rightRail={rightRail}>
+      {children}
+    </ChartScroll>
+  );
 }

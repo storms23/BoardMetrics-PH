@@ -75,6 +75,17 @@ export function formatCycleLabel(month: string | null | undefined, year: number)
   return `${month ?? ""} ${year}`.trim();
 }
 
+/** Two-line x-axis parts: month name + full year. */
+export function cycleAxisParts(
+  month: string | null | undefined,
+  year: number,
+): { month: string; year: string } {
+  const raw = month ?? "?";
+  const base = raw.replace(/\s*\([^)]+\)\s*$/, "").trim();
+  const firstMonth = base.split(/[–-]/)[0]?.trim() || "?";
+  return { month: firstMonth, year: String(year) };
+}
+
 /** Compact axis label for charts, e.g. March 2016 → Mar 16; May (Written) → May 26 W */
 export function shortCycleLabel(month: string | null | undefined, year: number): string {
   const raw = month ?? "?";

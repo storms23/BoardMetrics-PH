@@ -91,7 +91,13 @@ header a.no-underline-link:hover {
   }
 
   .table-scroll {
-    @apply overflow-x-auto;
+    @apply overflow-x-auto overflow-y-hidden;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .chart-scroll {
+    @apply overflow-x-auto overflow-y-visible md:overflow-x-hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
   }
 }

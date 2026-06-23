@@ -11,7 +11,7 @@ import {
   Tooltip,
   YAxis,
 } from "recharts";
-import type { VolumeHighlight } from "@/lib/trend-analytics";
+import type { CycleHighlight } from "@/lib/trend-analytics";
 import { ChartCalloutLabel, uniqueHighlights } from "./ChartCalloutLabel";
 import { CHART_HIGHLIGHT, HIGHLIGHT_DOT_R } from "./highlight-colors";
 import {
@@ -23,22 +23,18 @@ import {
 import { chartBottomMargin } from "./ChartXAxis";
 import { ChartFrame } from "./ChartFrame";
 import { AREA_DOT, AREA_STROKE, blueAreaGradientDef } from "./chartFill";
+import type { TrendPoint } from "./LineTrend";
 import { ChartXAxis } from "./ChartXAxis";
-import type { ChartCycleFields } from "./chartData";
 
-export interface VolumePoint extends ChartCycleFields {
-  takers: number | null;
-}
-
-function VolumeHighlightDot({
+function HighlightDot({
   highlight,
   role,
   fill,
   color,
   placement,
 }: {
-  highlight: VolumeHighlight;
-  role: "Peak" | "Lowest";
+  highlight: CycleHighlight;
+  role: "Lowest" | "Highest";
   fill: string;
   color: string;
   placement: CalloutPlacement;
@@ -46,7 +42,7 @@ function VolumeHighlightDot({
   return (
     <ReferenceDot
       x={highlight.chartLabel}
-      y={highlight.takers}
+      y={highlight.rate}
       r={HIGHLIGHT_DOT_R}
       ifOverflow="visible"
       fill={fill}
@@ -57,7 +53,7 @@ function VolumeHighlightDot({
           {...labelProps}
           role={role}
           fullLabel={highlight.fullLabel}
-          valueFormatted={highlight.takers.toLocaleString()}
+          valueFormatted={`${highlight.rate.toFixed(2)}%`}
           color={color}
           stackDy={placement.stackDy}
           edgeZone={placement.edgeZone}
@@ -67,49 +63,49 @@ function VolumeHighlightDot({
   );
 }
 
-function VolumeTrendInner({
+function PassRateTrendChartInner({
   data,
-  peak,
   lowest,
+  highest,
   chartWidth,
 }: {
-  data: VolumePoint[];
-  peak?: VolumeHighlight | null;
-  lowest?: VolumeHighlight | null;
+  data: TrendPoint[];
+  lowest: CycleHighlight | null;
+  highest: CycleHighlight | null;
   chartWidth: number;
 }) {
-  const values = data.map((d) => d.takers).filter((x): x is number => x != null);
-  const max = values.length ? Math.max(...values) : 100;
-  const highlights = uniqueHighlights([peak, lowest]);
-  const hasCallouts = highlights.length > 0;
+  const extremes = uniqueHighlights([lowest, highest]);
+  const hasCallouts = extremes.length > 0;
   const gradId = useId().replace(/:/g, "");
 
-  const peakIndex =
-    peak && highlights.some((h) => h.chartLabel === peak.chartLabel)
-      ? indexOfChartLabel(data, peak.chartLabel)
-      : null;
   const lowestIndex =
-    lowest && highlights.some((h) => h.chartLabel === lowest.chartLabel)
+    lowest && extremes.some((h) => h.chartLabel === lowest.chartLabel)
       ? indexOfChartLabel(data, lowest.chartLabel)
+      : null;
+  const highestIndex =
+    highest && extremes.some((h) => h.chartLabel === highest.chartLabel)
+      ? indexOfChartLabel(data, highest.chartLabel)
       : null;
 
   const placementMap = useMemo(() => {
     const items: { key: string; index: number }[] = [];
-    if (peakIndex != null) items.push({ key: "peak", index: peakIndex });
     if (lowestIndex != null) items.push({ key: "lowest", index: lowestIndex });
+    if (highestIndex != null) items.push({ key: "highest", index: highestIndex });
     return resolveCalloutPlacementsBatch(items, data.length, chartWidth);
-  }, [peakIndex, lowestIndex, data.length, chartWidth]);
+  }, [lowestIndex, highestIndex, data.length, chartWidth]);
 
   const maxStackDy = Math.max(
     0,
-    ...[placementMap.get("peak"), placementMap.get("lowest")].map((p) => p?.stackDy ?? 0),
+    ...[placementMap.get("lowest"), placementMap.get("highest")].map((p) => p?.stackDy ?? 0),
   );
 
-  const highlightIndices = [peakIndex, lowestIndex].filter((i): i is number => i != null);
+  const highlightIndices = [lowestIndex, highestIndex].filter(
+    (i): i is number => i != null,
+  );
 
   const margins = computeCalloutMargins({
     pointCount: data.length,
-    calloutCount: highlights.length,
+    calloutCount: extremes.length,
     highlightIndices,
     baseBottom: chartBottomMargin(data.length, hasCallouts),
     maxStackDy,
@@ -125,14 +121,14 @@ function VolumeTrendInner({
           stroke="#475569"
           fontSize={12}
           tick={{ fill: "#475569" }}
-          domain={[0, Math.ceil(max * 1.1)]}
-          width={48}
-          tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+          domain={[0, 100]}
+          unit="%"
+          width={44}
         />
         <Tooltip
           labelFormatter={(_, payload) =>
-            (payload?.[0]?.payload as VolumePoint | undefined)?.fullLabel ??
-            (payload?.[0]?.payload as VolumePoint | undefined)?.label ??
+            (payload?.[0]?.payload as TrendPoint | undefined)?.fullLabel ??
+            (payload?.[0]?.payload as TrendPoint | undefined)?.label ??
             ""
           }
           contentStyle={{
@@ -141,16 +137,13 @@ function VolumeTrendInner({
             borderRadius: 8,
             color: "#0f172a",
           }}
-          formatter={(value) => [
-            typeof value === "number" ? value.toLocaleString() : "—",
-            "Examinees",
-          ]}
         />
         <Legend wrapperStyle={{ fontSize: 12, color: "#334155" }} />
+
         <Area
           type="monotone"
-          dataKey="takers"
-          name="Examinees"
+          dataKey="national"
+          name="National"
           stroke={AREA_STROKE}
           fill={`url(#${gradId})`}
           strokeWidth={2.5}
@@ -159,18 +152,8 @@ function VolumeTrendInner({
           connectNulls
         />
 
-        {peak && peakIndex != null && placementMap.has("peak") && (
-          <VolumeHighlightDot
-            highlight={peak}
-            role="Peak"
-            fill={CHART_HIGHLIGHT.peak.fill}
-            color={CHART_HIGHLIGHT.peak.label}
-            placement={placementMap.get("peak")!}
-          />
-        )}
-
         {lowest && lowestIndex != null && placementMap.has("lowest") && (
-          <VolumeHighlightDot
+          <HighlightDot
             highlight={lowest}
             role="Lowest"
             fill={CHART_HIGHLIGHT.lowest.fill}
@@ -178,27 +161,41 @@ function VolumeTrendInner({
             placement={placementMap.get("lowest")!}
           />
         )}
+
+        {highest && highestIndex != null && placementMap.has("highest") && (
+          <HighlightDot
+            highlight={highest}
+            role="Highest"
+            fill={CHART_HIGHLIGHT.highest.fill}
+            color={CHART_HIGHLIGHT.highest.label}
+            placement={placementMap.get("highest")!}
+          />
+        )}
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-export function VolumeTrend({
+export function PassRateTrendChart({
   data,
-  peak,
   lowest,
+  highest,
+  latest: _latest,
 }: {
-  data: VolumePoint[];
-  peak?: VolumeHighlight | null;
-  lowest?: VolumeHighlight | null;
+  data: TrendPoint[];
+  lowest: CycleHighlight | null;
+  highest: CycleHighlight | null;
+  latest: CycleHighlight | null;
 }) {
+  void _latest;
+
   return (
     <ChartFrame pointCount={data.length}>
       {(chartWidth) => (
-        <VolumeTrendInner
+        <PassRateTrendChartInner
           data={data}
-          peak={peak}
           lowest={lowest}
+          highest={highest}
           chartWidth={chartWidth}
         />
       )}

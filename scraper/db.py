@@ -270,7 +270,26 @@ def missing_cycles_from_index(index_rows: list[dict]) -> list[dict]:
     return missing
 
 
-def upsert_exam_result(exam_code: str, month: str | None, year: int, stats: dict, url: str) -> int:
+def upsert_exam_result(
+    exam_code: str,
+    month: str | None,
+    year: int,
+    stats: dict,
+    url: str,
+    *,
+    force: bool = False,
+) -> int:
+    """Upsert national stats. When force=False, never clobber good or manual rows with placeholders."""
+    existing = get_exam_result(exam_code, month, year)
+    new_takers = stats.get("total_takers") or 0
+    if not force and existing:
+        existing_url = existing.get("source_url") or ""
+        existing_takers = existing.get("total_takers") or 0
+        if existing_url.startswith("manual://"):
+            return existing["id"]
+        if existing_takers > 0 and new_takers <= 0:
+            return existing["id"]
+
     program_id = get_program_id(exam_code)
     row = {
         "program_id": program_id,

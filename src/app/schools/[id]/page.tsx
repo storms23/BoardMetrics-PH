@@ -9,6 +9,7 @@ import {
   ConsistencyBadge,
 } from "@/components/ui";
 import { LineTrend } from "@/components/charts/LineTrend";
+import { buildChartCycleFields } from "@/components/charts/chartData";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSchoolProfile } from "@/lib/queries";
 import type { ConsistencyLabel } from "@/lib/types";
@@ -65,7 +66,7 @@ export default async function SchoolPage({
     .reverse()
     .filter((h) => h.pass_rate != null)
     .map((h) => ({
-      label: `${h.month ?? ""} ${h.year}`.trim(),
+      ...buildChartCycleFields(h.month, h.year),
       school: h.pass_rate,
       national: h.national_rate,
     }));
@@ -115,7 +116,7 @@ export default async function SchoolPage({
       {trendData.length >= 2 && (
         <section>
           <SectionTitle>Pass rate vs national</SectionTitle>
-          <Card>
+          <Card className="min-w-0">
             <LineTrend data={trendData} />
           </Card>
         </section>
