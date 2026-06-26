@@ -9,14 +9,15 @@ type TickProps = {
   lookup: Map<string, CycleAxisParts>;
 };
 
-/** Two-line cycle tick: month on first line, full year on second. */
+/** Two-line cycle tick: abbreviated month on first line, two-digit year on second. */
 export function CycleAxisTick({ x = 0, y = 0, payload, lookup }: TickProps) {
   const tx = typeof x === "number" ? x : Number(x) || 0;
   const ty = typeof y === "number" ? y : Number(y) || 0;
   const key = payload?.value ?? "";
   const parts = lookup.get(key);
-  const month = parts?.month ?? key;
-  const year = parts?.year ?? "";
+  const [fallbackMonth = key, fallbackYear = ""] = key.split(/\s+/);
+  const month = parts?.month ?? fallbackMonth;
+  const year = parts?.year ?? fallbackYear.replace(/\D/g, "").slice(-2);
 
   return (
     <g transform={`translate(${tx},${ty})`}>

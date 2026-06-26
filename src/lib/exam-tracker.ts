@@ -40,6 +40,56 @@ const MONTH_ORDER: Record<string, number> = {
   December: 12,
 };
 
+/** Canonical 3-letter month labels for chart x-axis ticks. */
+const MONTH_ABBREV: Record<string, string> = {
+  january: "Jan",
+  jan: "Jan",
+  february: "Feb",
+  feb: "Feb",
+  march: "Mar",
+  mar: "Mar",
+  april: "Apr",
+  apr: "Apr",
+  may: "May",
+  june: "Jun",
+  jun: "Jun",
+  july: "Jul",
+  jul: "Jul",
+  august: "Aug",
+  aug: "Aug",
+  september: "Sep",
+  sept: "Sep",
+  sep: "Sep",
+  october: "Oct",
+  oct: "Oct",
+  november: "Nov",
+  nov: "Nov",
+  december: "Dec",
+  dec: "Dec",
+};
+
+function parseCycleMonthRaw(month: string | null | undefined): {
+  firstMonth: string;
+  phase: string;
+} {
+  const raw = month ?? "?";
+  const phase = raw.includes("Practical") ? " P" : raw.includes("Written") ? " W" : "";
+  const base = raw.replace(/\s*\([^)]+\)\s*$/, "").trim();
+  const firstMonth = base.split(/[–-]/)[0]?.trim() || "?";
+  return { firstMonth, phase };
+}
+
+/** Abbreviate a month name to a short chart label (Jan, Feb, …, Dec). */
+export function abbreviateMonthName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  const mapped = MONTH_ABBREV[trimmed.toLowerCase()];
+  if (mapped) return mapped;
+  return trimmed.length <= 3
+    ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase()
+    : trimmed.slice(0, 3).charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
+}
+
 export function trackerCutoffYear(now = new Date()): number {
   return now.getFullYear() - TRACKER_WINDOW_YEARS;
 }
@@ -75,25 +125,22 @@ export function formatCycleLabel(month: string | null | undefined, year: number)
   return `${month ?? ""} ${year}`.trim();
 }
 
-/** Two-line x-axis parts: month name + full year. */
+/** Two-line x-axis parts: abbreviated month + two-digit year (chart ticks). */
 export function cycleAxisParts(
   month: string | null | undefined,
   year: number,
 ): { month: string; year: string } {
-  const raw = month ?? "?";
-  const base = raw.replace(/\s*\([^)]+\)\s*$/, "").trim();
-  const firstMonth = base.split(/[–-]/)[0]?.trim() || "?";
-  return { month: firstMonth, year: String(year) };
+  const { firstMonth, phase } = parseCycleMonthRaw(month);
+  return {
+    month: `${abbreviateMonthName(firstMonth)}${phase}`,
+    year: String(year).slice(-2),
+  };
 }
 
 /** Compact axis label for charts, e.g. March 2016 → Mar 16; May (Written) → May 26 W */
 export function shortCycleLabel(month: string | null | undefined, year: number): string {
-  const raw = month ?? "?";
-  const phase = raw.includes("Practical") ? " P" : raw.includes("Written") ? " W" : "";
-  const base = raw.replace(/\s*\([^)]+\)\s*$/, "").trim();
-  const firstMonth = base.split(/[–-]/)[0]?.trim() || "?";
-  const m = firstMonth.slice(0, 3);
-  return `${m} ${String(year).slice(-2)}${phase}`;
+  const { firstMonth, phase } = parseCycleMonthRaw(month);
+  return `${abbreviateMonthName(firstMonth)} ${String(year).slice(-2)}${phase}`;
 }
 
 export function filterTrackerWindow<T extends { year: number }>(
