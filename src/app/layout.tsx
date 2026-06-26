@@ -64,9 +64,11 @@ export default function RootLayout({
         <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
         <footer className="border-t border-ink-line bg-white">
           <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-slate-600">
-            {SITE_NAME} presents publicly available PRC data for research and information. It
-            is an unofficial, independent project and is not affiliated with the Professional
-            Regulation Commission.
+            <p>
+              Disclaimer: This website is provided for informational purposes only. Although we
+              strive for accuracy, information may contain errors, omissions, or become outdated.
+              Please verify important details with official sources before relying on the data.
+            </p>
           </div>
         </footer>
       </body>

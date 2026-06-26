@@ -178,6 +178,7 @@ function CombinedChart({
           strokeWidth={2.5}
           dot={AREA_DOT}
           activeDot={{ r: 4 }}
+          isAnimationActive={false}
           connectNulls
         />
         <Line
